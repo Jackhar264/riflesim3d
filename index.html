@@ -59,7 +59,6 @@
       display: block;
       cursor: crosshair;
     }
-    /* Overlay Canvas for Scope Reticle & Glass Vignette */
     #reticleCanvas {
       position: absolute;
       inset: 0;
@@ -612,9 +611,9 @@
     ];
 
     const OPTICS = [
-      { id: 'opt_1', name: '3-10x42 SFP Mil-Dot', cost: 0, minZoom: 3, maxZoom: 10, ffp: false, reticle: 'mildot', desc: 'Second Focal Plane (Mil-dots true ONLY at 10x).' },
-      { id: 'opt_2', name: '5-15x50 FFP Simple Tree', cost: 850, minZoom: 5, maxZoom: 15, ffp: true, reticle: 'simple_tree', desc: 'First Focal Plane with 0.5 MRAD stadia & holdover tree.' },
-      { id: 'opt_3', name: '5-25x56 FFP Full Christmas Tree', cost: 2200, minZoom: 5, maxZoom: 25, ffp: true, reticle: 'full_tree', desc: 'First Focal Plane 0.2 MRAD grid reticle with wind dots.' },
+      { id: 'opt_1', name: '3-10x42 SFP Mil-Dot', cost: 0, minZoom: 3, maxZoom: 10, ffp: false, reticle: 'mildot', desc: 'Second Focal Plane (0.20 MRAD dots true ONLY at 10x).' },
+      { id: 'opt_2', name: '5-15x50 FFP Simple Tree', cost: 850, minZoom: 5, maxZoom: 15, ffp: true, reticle: 'simple_tree', desc: 'First Focal Plane with 0.5 MRAD hashes, numbered stadia & holdover tree.' },
+      { id: 'opt_3', name: '5-25x56 FFP Full Christmas Tree', cost: 2200, minZoom: 5, maxZoom: 25, ffp: true, reticle: 'full_tree', desc: 'First Focal Plane 0.2 MRAD grid reticle with numbered stadia & wind dots.' },
       { id: 'opt_4', name: '6-36x56 FFP Extreme ELR Tree', cost: 3800, minZoom: 6, maxZoom: 36, ffp: true, reticle: 'elr_tree', desc: 'High-magnification 36x FFP ELR reticle with extended 16 MRAD tree.' }
     ];
 
@@ -675,10 +674,9 @@
       curWindClock: 3.0,
       windPhase: 0,
 
-      // Camera / Aim Orientation (in radians)
       yawRad: 0.0,
       pitchRad: 0.0,
-      adsMode: true, // true = Scope PiP / ADS, false = 1x Peripheral Spotter View
+      adsMode: true,
 
       turretElev: 0.0,
       turretWind: 0.0,
@@ -751,21 +749,19 @@
     // =========================================================================
     const YD_TO_M = 0.9144;
     const IN_TO_M = 0.0254;
+    const SCOPE_BASE_FOV_DEG = 19.5; // Authentic riflescope 1x apparent FOV
 
     const threeCanvas = document.getElementById('threeCanvas');
     const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = true;
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x88b4dc);
-    scene.fog = new THREE.FogExp2(0x9ec0de, 0.00038);
+    scene.fog = new THREE.FogExp2(0x9ec0de, 0.00034);
 
-    // Main Camera (1x Peripheral View) & Scope Camera (High-Zoom Optical View)
-    const mainCamera = new THREE.PerspectiveCamera(45, 16 / 10, 0.1, 3500);
-    const scopeCamera = new THREE.PerspectiveCamera(4.5, 1, 0.5, 3500);
+    const mainCamera = new THREE.PerspectiveCamera(42, 16 / 10, 0.1, 3500);
+    const scopeCamera = new THREE.PerspectiveCamera(2.0, 1, 0.5, 3500);
 
-    // Lighting
     const hemiLight = new THREE.HemisphereLight(0xdceeff, 0x4d5d38, 0.85);
     scene.add(hemiLight);
 
@@ -773,10 +769,8 @@
     sunLight.position.set(180, 320, 120);
     scene.add(sunLight);
 
-    // Procedural Valley Height Function (Downrange is -Z in Three.js)
     function getTerrainHeight(x, z) {
       const distM = Math.max(0, -z);
-      // Gentle rise at distant mountain ridge + valley bowl walls on left/right
       const valleyWalls = Math.pow(Math.abs(x) / 140, 2.1) * 28;
       const rollingHills = Math.sin(x * 0.015) * Math.cos(z * 0.012) * 3.5;
       const mountainBackdrop = distM > 1900 ? Math.pow((distM - 1900) / 300, 1.7) * 95 : 0;
@@ -784,7 +778,6 @@
       return (valleyWalls + rollingHills + mountainBackdrop) * firingBenchFlat - 1.5;
     }
 
-    // Build 3D Valley Terrain Mesh
     const terrainGeo = new THREE.PlaneGeometry(1600, 2800, 110, 150);
     terrainGeo.rotateX(-Math.PI / 2);
     terrainGeo.translate(0, 0, -1350);
@@ -809,15 +802,13 @@
     terrainGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     terrainGeo.computeVertexNormals();
 
-    const terrainMat = new THREE.MeshStandardMaterial({
+    const terrainMesh = new THREE.Mesh(terrainGeo, new THREE.MeshStandardMaterial({
       vertexColors: true,
       roughness: 0.92,
       metalness: 0.02
-    });
-    const terrainMesh = new THREE.Mesh(terrainGeo, terrainMat);
+    }));
     scene.add(terrainMesh);
 
-    // Add Scattered 3D Pine Trees & Scrub along Valley Sides
     const treeTrunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3525, roughness: 0.9 });
     const treeLeafMat = new THREE.MeshStandardMaterial({ color: 0x2f4527, roughness: 0.85 });
     for (let i = 0; i < 160; i++) {
@@ -838,40 +829,35 @@
     }
 
     // =========================================================================
-    // 5. 3D RIFLE RIG (CHASSIS, FLUTED BARREL, MUZZLE BRAKE & SCOPE TUBE)
+    // 5. 3D RIFLE RIG
     // =========================================================================
     const rifleRig = new THREE.Group();
-    rifleRig.position.set(0, 0, 0); // Shooter eye / muzzle origin at (0, 0, 0)
+    rifleRig.position.set(0, 0, 0);
     scene.add(rifleRig);
 
     const chassisMat = new THREE.MeshStandardMaterial({ color: 0x2b3036, roughness: 0.65, metalness: 0.3 });
     const barrelMat = new THREE.MeshStandardMaterial({ color: 0x1c2026, roughness: 0.35, metalness: 0.8 });
     const scopeMat = new THREE.MeshStandardMaterial({ color: 0x111418, roughness: 0.4, metalness: 0.7 });
 
-    // Heavy Barrel extending forward (-Z) below sightline
     const barrelMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.019, 0.78, 16), barrelMat);
     barrelMesh.rotation.x = Math.PI / 2;
     barrelMesh.position.set(0, -0.045, -0.45);
     rifleRig.add(barrelMesh);
 
-    // Muzzle Brake
     const brakeMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.017, 0.065, 16), barrelMat);
     brakeMesh.rotation.x = Math.PI / 2;
     brakeMesh.position.set(0, -0.045, -0.86);
     rifleRig.add(brakeMesh);
 
-    // Chassis Forend & Arca Rail
     const forendMesh = new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.042, 0.48), chassisMat);
     forendMesh.position.set(0, -0.072, -0.32);
     rifleRig.add(forendMesh);
 
-    // Scope Objective Bell & Tube (visible in 1x peripheral view)
     const scopeTubeMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.022, 0.36, 20), scopeMat);
     scopeTubeMesh.rotation.x = Math.PI / 2;
     scopeTubeMesh.position.set(0, 0.0, -0.24);
     rifleRig.add(scopeTubeMesh);
 
-    // Elevation & Windage Turret Caps on Scope
     const elevTurretMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.024, 16), scopeMat);
     elevTurretMesh.position.set(0, 0.028, -0.16);
     rifleRig.add(elevTurretMesh);
@@ -882,13 +868,13 @@
     rifleRig.add(windTurretMesh);
 
     function updateRifleAppearance() {
-      if (state.eq.chassis === 'chs_3') chassisMat.color.setHex(0x3b4738); // OD Green PRS Chassis
-      else if (state.eq.chassis === 'chs_2') chassisMat.color.setHex(0x3a434e); // Tungsten Aluminum
-      else chassisMat.color.setHex(0x23262b); // Polymer Black
+      if (state.eq.chassis === 'chs_3') chassisMat.color.setHex(0x3b4738);
+      else if (state.eq.chassis === 'chs_2') chassisMat.color.setHex(0x3a434e);
+      else chassisMat.color.setHex(0x23262b);
     }
 
     // =========================================================================
-    // 6. 3D STEEL TARGETS, DIRT BERMS & WIND FLAGS ACROSS THE VALLEY
+    // 6. 3D STEEL TARGETS, BERMS, WIND FLAGS & HIGH-VISIBILITY SPLASH SYSTEM
     // =========================================================================
     const TARGET_DEFS = [
       { distYd: 350, xOffsetM: -14, type: 'ipsc_full', mult: 1.0, label: '350 yd Full IPSC' },
@@ -904,7 +890,7 @@
     const windFlags = [];
     const steelMat = new THREE.MeshStandardMaterial({ color: 0xf1f5f9, roughness: 0.45, metalness: 0.25 });
     const postMat = new THREE.MeshStandardMaterial({ color: 0x2d3748, roughness: 0.8 });
-    const bermMat = new THREE.MeshStandardMaterial({ color: 0x7c6244, roughness: 0.95 });
+    const bermMat = new THREE.MeshStandardMaterial({ color: 0x6e5539, roughness: 0.95 });
     const flagMat = new THREE.MeshStandardMaterial({ color: 0xe53e3e, side: THREE.DoubleSide, roughness: 0.7 });
 
     TARGET_DEFS.forEach((def, idx) => {
@@ -915,13 +901,11 @@
       const group = new THREE.Group();
       group.position.set(xPos, groundY, zPos);
 
-      // Dirt Backstop Berm behind target
-      const berm = new THREE.Mesh(new THREE.ConeGeometry(6.5, 3.2, 12), bermMat);
-      berm.position.set(0, 1.4, -3.5);
-      berm.scale.set(1.5, 1, 0.8);
+      const berm = new THREE.Mesh(new THREE.ConeGeometry(7.5, 3.6, 12), bermMat);
+      berm.position.set(0, 1.5, -3.5);
+      berm.scale.set(1.6, 1, 0.8);
       group.add(berm);
 
-      // Steel T-Post Hanger Frame
       const frameH = 1.65;
       const leftLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, frameH, 8), postMat);
       leftLeg.position.set(-0.45, frameH / 2, 0);
@@ -932,7 +916,6 @@
       topBar.position.set(0, frameH, 0);
       group.add(leftLeg, rightLeg, topBar);
 
-      // Target Plate Mesh (True Physical Dimensions in Meters)
       let plateMesh;
       let hitCheck = {};
       const centerHeightY = 1.05;
@@ -955,11 +938,9 @@
       }
       group.add(plateMesh);
 
-      // 3D Wind Flag beside target (toggled by Tier 2+ Wind Intel)
       const flagPole = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 1.8, 6), postMat);
       flagPole.position.set(1.3, 0.9, 0);
       const flagCloth = new THREE.Mesh(new THREE.PlaneGeometry(0.85, 0.35), flagMat);
-      flagCloth.position.set(1.3 + 0.425, 1.62, 0);
       const flagPivot = new THREE.Group();
       flagPivot.position.set(1.3, 1.62, 0);
       flagCloth.position.set(0.425, 0, 0);
@@ -977,41 +958,110 @@
       });
     });
 
-    // Active 3D Bullet Vapor Traces & Dust Clouds
     const activeTraces = [];
-    const activeDusts = [];
+    const activeSplashes = [];
 
     function spawn3DTrace(pointsWorld) {
       const geo = new THREE.BufferGeometry().setFromPoints(pointsWorld);
       const mat = new THREE.LineBasicMaterial({
         color: 0xffffff,
         transparent: true,
-        opacity: 0.55
+        opacity: 0.65
       });
       const line = new THREE.Line(geo, mat);
       scene.add(line);
       activeTraces.push({ line, mat, life: 1.0 });
     }
 
-    function spawn3DDust(posWorld) {
-      const geo = new THREE.SphereGeometry(0.35, 10, 10);
-      const mat = new THREE.MeshBasicMaterial({
-        color: 0xc8b292,
+    // High-visibility multi-layer dirt splash & ejecta plume so misses stand out clearly at long range
+    function spawn3DDirtSplash(posWorld) {
+      const distM = Math.max(200, Math.abs(posWorld.z));
+      // Scale splash size angularly (~1.2 MRAD) so it is unmistakable through the optic at 500–2000 yd
+      const baseRadius = Math.max(0.55, distM * 0.0011);
+
+      const splashGroup = new THREE.Group();
+      splashGroup.position.copy(posWorld);
+
+      // 1. Bright sunlit sand/dust core cloud
+      const coreMat = new THREE.MeshBasicMaterial({
+        color: 0xf3e5ab,
         transparent: true,
-        opacity: 0.75
+        opacity: 0.92,
+        depthWrite: false
       });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.copy(posWorld);
-      scene.add(mesh);
-      activeDusts.push({ mesh, mat, life: 1.0 });
+      const coreMesh = new THREE.Mesh(new THREE.SphereGeometry(baseRadius, 12, 12), coreMat);
+      splashGroup.add(coreMesh);
+
+      // 2. Vertical dirt fountain plume
+      const plumeMat = new THREE.MeshBasicMaterial({
+        color: 0xd9c29c,
+        transparent: true,
+        opacity: 0.85,
+        depthWrite: false
+      });
+      const plumeMesh = new THREE.Mesh(new THREE.ConeGeometry(baseRadius * 0.9, baseRadius * 2.8, 10), plumeMat);
+      plumeMesh.position.y = baseRadius * 1.1;
+      splashGroup.add(plumeMesh);
+
+      // 3. Flying clod/debris particles
+      const particles = [];
+      const clodMat = new THREE.MeshBasicMaterial({ color: 0x4a3520 });
+      for (let p = 0; p < 10; p++) {
+        const clod = new THREE.Mesh(new THREE.BoxGeometry(baseRadius * 0.22, baseRadius * 0.22, baseRadius * 0.22), clodMat);
+        const angle = (p / 10) * Math.PI * 2;
+        const speed = baseRadius * (1.5 + Math.random() * 1.5);
+        particles.push({
+          mesh: clod,
+          vx: Math.cos(angle) * speed,
+          vy: baseRadius * (2.5 + Math.random() * 2.5),
+          vz: Math.sin(angle) * speed
+        });
+        splashGroup.add(clod);
+      }
+
+      scene.add(splashGroup);
+      activeSplashes.push({
+        group: splashGroup,
+        coreMat,
+        plumeMat,
+        particles,
+        life: 1.0,
+        baseRadius
+      });
+    }
+
+    // Bright spark flash on steel hit
+    function spawn3DSteelSpark(posWorld) {
+      const distM = Math.max(200, Math.abs(posWorld.z));
+      const sparkR = Math.max(0.22, distM * 0.00045);
+      const sparkMat = new THREE.MeshBasicMaterial({
+        color: 0xffd166,
+        transparent: true,
+        opacity: 0.98
+      });
+      const sparkMesh = new THREE.Mesh(new THREE.SphereGeometry(sparkR, 10, 10), sparkMat);
+      sparkMesh.position.copy(posWorld);
+      sparkMesh.position.z += 0.05;
+      scene.add(sparkMesh);
+
+      activeSplashes.push({
+        group: sparkMesh,
+        coreMat: sparkMat,
+        plumeMat: null,
+        particles: [],
+        life: 0.45,
+        isSpark: true
+      });
     }
 
     function spawn3DImpactDecal(posWorld, isHit) {
-      const geo = new THREE.CircleGeometry(isHit ? 0.025 : 0.08, 10);
-      const mat = new THREE.MeshBasicMaterial({ color: isHit ? 0x2d3748 : 0x2b1d10 });
+      const distM = Math.max(200, Math.abs(posWorld.z));
+      const r = isHit ? 0.032 : Math.max(0.18, distM * 0.00035);
+      const geo = new THREE.CircleGeometry(r, 12);
+      const mat = new THREE.MeshBasicMaterial({ color: isHit ? 0x1a202c : 0x2b1d10 });
       const decal = new THREE.Mesh(geo, mat);
       decal.position.copy(posWorld);
-      decal.position.z += 0.016;
+      decal.position.z += 0.02;
       scene.add(decal);
     }
 
@@ -1035,7 +1085,6 @@
       const refArea = (Math.PI / 4) * (IN_TO_M ** 2);
       const dragConst = (density * refArea) / (2.0 * 0.45359237 * bcG7);
 
-      // Apparent Wind Vector (Ballistic frame: +X downrange, +Y up, +Z right)
       const windRad = (windClock * 30.0) * (Math.PI / 180);
       const wMps = windMph * 0.44704;
       const wx = -wMps * Math.cos(windRad);
@@ -1048,7 +1097,6 @@
         return [-ad * (vrx / vr), -g - ad * (vy / vr), -ad * (vrz / vr)];
       }
 
-      // Compute 100yd zero elevation angle
       function zeroRK4(angle) {
         let x = 0, y = -sightH_m, vx = v0 * Math.cos(angle), vy = v0 * Math.sin(angle);
         const dt = 0.001;
@@ -1076,7 +1124,6 @@
         zeroTheta -= err / zero_m;
       }
 
-      // Total bore elevation = camera pitch + zero angle
       const totalPitch = launchPitch + zeroTheta;
       const dt = 0.0015;
       let t = 0, x = 0, y = -sightH_m, z = 0;
@@ -1084,7 +1131,6 @@
       let vy = v0 * Math.sin(totalPitch);
       let vz = 0;
 
-      // Miller Sg
       const tRatio = twistIn / diaIn;
       const lRatio = lenIn / diaIn;
       const ft = ((tempF + 460) / 519.0) * (29.92 / pressInHg);
@@ -1101,12 +1147,10 @@
       let hitPointWorld = null;
       let finalMach = 2.0;
 
-      // Helper to transform ballistic (x_downrange, y_up, z_right) into Three.js world space
       const cosYaw = Math.cos(launchYaw);
       const sinYaw = Math.sin(launchYaw);
 
       function toWorld(bx, by, bz) {
-        // Ballistic forward (+bx) maps to -Z rotated by launchYaw; right (+bz) maps to +X rotated by launchYaw
         const wx3 = -bx * sinYaw + bz * cosYaw;
         const wz3 = -bx * cosYaw - bz * sinYaw;
         return new THREE.Vector3(wx3, by, wz3);
@@ -1131,7 +1175,6 @@
           transonicTime += dt;
         }
 
-        // Instantaneous spin drift + Coriolis offsets at time t
         const spin_m = (1.25 * (sg + 1.2) * (t ** 1.83)) * IN_TO_M;
         const corH_m = omega * x * t * Math.sin(latRad);
         const corV_m = omega * v0 * (t ** 2) * Math.cos(latRad) * Math.sin(azRad);
@@ -1143,7 +1186,6 @@
         }
         stepCount++;
 
-        // Check collision with any 3D Steel Target Plate
         for (const tObj of targetObjects) {
           const dz = Math.abs(worldPt.z - tObj.worldCenter.z);
           if (dz <= 0.45) {
@@ -1166,7 +1208,6 @@
         }
         if (hitTarget) break;
 
-        // Check terrain ground collision
         const groundY = getTerrainHeight(worldPt.x, worldPt.z);
         if (worldPt.y <= groundY && x > 15) {
           hitPointWorld = worldPt.clone();
@@ -1195,7 +1236,6 @@
     const raycaster = new THREE.Raycaster();
 
     function triggerLRF() {
-      // Cast ray straight down the center of the scope camera
       raycaster.setFromCamera(new THREE.Vector2(0, 0), scopeCamera);
       const targetMeshes = targetObjects.map(t => t.plateMesh);
       const hitTargets = raycaster.intersectObjects(targetMeshes);
@@ -1292,15 +1332,12 @@
       document.getElementById('btn-fire').disabled = true;
       setFeedback("SHOT FIRED — TRACKING 3D TRACE...", "#e5a93b");
 
-      // Stochastic shot-to-shot MV & BC
       const actualMV = gaussianRandom(b.mv + a.mvBonus, a.mvSD);
       const actualBC = gaussianRandom(b.bc, b.bc * a.bcSDPct);
 
-      // Mechanical MOA cone + transonic dispersion
       const effectiveMoa = Math.max(0.15, brl.groupMoa + chs.groupBonus);
       const dispStdRad = ((effectiveMoa * 0.290888) / 2.5) / 1000.0;
 
-      // Bore launch angles = current camera aim + dialed turret corrections + rear bag + mechanical cone
       const turretElevRad = state.turretElev / 1000.0;
       const turretWindRad = state.turretWind / 1000.0;
       const bagElevRad = state.bagElevMrad / 1000.0;
@@ -1327,7 +1364,6 @@
         recordTrace: true
       });
 
-      // Apply Transonic angular perturbation if bullet entered Mach 1.25 -> 0.85
       if (sim.transonicTime > 0 && sim.hitPointWorld) {
         const stabilityFactor = Math.max(0.6, Math.min(2.0, sim.sg));
         const transonicJitterMrad = (sim.transonicTime * 0.42) / stabilityFactor;
@@ -1336,7 +1372,6 @@
         sim.hitPointWorld.x += gaussianRandom(0, jitterM);
         sim.hitPointWorld.y += gaussianRandom(0, jitterM * 1.15);
 
-        // Re-verify if transonic buffeting pushed bullet onto or off a target plate
         sim.hitTarget = null;
         for (const tObj of targetObjects) {
           if (Math.abs(sim.hitPointWorld.z - tObj.worldCenter.z) <= 1.2) {
@@ -1359,11 +1394,9 @@
         }
       }
 
-      // Trigger Recoil Impulse
       state.recoilPitch = 0.0032 * chs.recoilMult * (b.wt / 100);
       state.recoilYaw = gaussianRandom(0, 0.0007 * chs.recoilMult);
 
-      // Spawn 3D vapor trace immediately so shooter watches bullet arc downrange
       if (sim.tracePoints.length > 1) {
         spawn3DTrace(sim.tracePoints);
       }
@@ -1375,6 +1408,7 @@
         const machNote = sim.finalMach < 1.15 ? ` [Mach ${sim.finalMach.toFixed(2)} Transonic]` : '';
 
         if (sim.hitTarget) {
+          spawn3DSteelSpark(sim.hitPointWorld);
           spawn3DImpactDecal(sim.hitPointWorld, true);
           const payout = parseFloat(((sim.hitTarget.def.distYd * 0.04) * sim.hitTarget.def.mult).toFixed(2));
           state.cash += payout;
@@ -1383,16 +1417,16 @@
           setFeedback(`STEEL IMPACT (${sim.hitTarget.def.distYd} YD)! +$${payout.toFixed(2)}${machNote}`, "#38a169");
         } else {
           if (sim.hitPointWorld) {
-            spawn3DDust(sim.hitPointWorld);
+            spawn3DDirtSplash(sim.hitPointWorld);
             spawn3DImpactDecal(sim.hitPointWorld, false);
           }
-          setFeedback(`MISS! Watch berm dust splash & vapor trace${machNote}`, "#e53e3e");
+          setFeedback(`MISS! Watch dirt plume & vapor trace${machNote}`, "#e53e3e");
         }
       }, Math.min(sim.tof * 850, 2400));
     }
 
     // =========================================================================
-    // 10. DUAL-CAMERA RENDER LOOP & 2D SCOPE RETICLE OVERLAY
+    // 10. DUAL-CAMERA RENDER LOOP & AUTHENTIC SCOPE RETICLE OVERLAY
     // =========================================================================
     const retCanvas = document.getElementById('reticleCanvas');
     const rCtx = retCanvas.getContext('2d');
@@ -1413,7 +1447,6 @@
     function animate(timestamp) {
       const tSec = timestamp * 0.001;
 
-      // Update gentle dynamic wind
       state.windPhase += 0.008;
       state.curWindMph = Math.max(0.5, state.baseWindMph + Math.sin(state.windPhase) * 1.8 + Math.cos(state.windPhase * 0.43) * 0.9);
       state.curWindClock = state.baseWindClock + Math.sin(state.windPhase * 0.6) * 0.45;
@@ -1425,7 +1458,6 @@
         document.getElementById('kes-dir').innerText = `${state.curWindClock.toFixed(1)} Clock`;
       }
 
-      // Animate 3D Wind Flags (3 o'clock wind blows toward 9 o'clock / -X)
       const showFlags = state.eq.wind === 'wind_2' || state.eq.wind === 'wind_3';
       const windBlowAngle = ((state.curWindClock * 30 + 180) * Math.PI) / 180;
       windFlags.forEach((wf, idx) => {
@@ -1438,31 +1470,57 @@
         }
       });
 
-      // Fade active 3D vapor traces & expand dust clouds
+      // Fade 3D vapor traces
       for (let i = activeTraces.length - 1; i >= 0; i--) {
         const tr = activeTraces[i];
-        tr.life -= 0.012;
-        tr.mat.opacity = Math.max(0, tr.life * 0.6);
+        tr.life -= 0.011;
+        tr.mat.opacity = Math.max(0, tr.life * 0.65);
         if (tr.life <= 0) {
           scene.remove(tr.line);
           activeTraces.splice(i, 1);
         }
       }
-      const driftX = -Math.sin((state.curWindClock * 30) * Math.PI / 180) * (state.curWindMph * 0.015);
-      for (let i = activeDusts.length - 1; i >= 0; i--) {
-        const d = activeDusts[i];
-        d.life -= 0.008;
-        d.mesh.position.x += driftX;
-        d.mesh.position.y += 0.012;
-        d.mesh.scale.addScalar(0.03);
-        d.mat.opacity = Math.max(0, d.life * 0.7);
-        if (d.life <= 0) {
-          scene.remove(d.mesh);
-          activeDusts.splice(i, 1);
+
+      // Update high-visibility dirt splash plumes & steel sparks
+      const driftX = -Math.sin((state.curWindClock * 30) * Math.PI / 180) * (state.curWindMph * 0.022);
+      for (let i = activeSplashes.length - 1; i >= 0; i--) {
+        const sp = activeSplashes[i];
+        if (sp.isSpark) {
+          sp.life -= 0.045;
+          sp.group.scale.addScalar(0.18);
+          sp.coreMat.opacity = Math.max(0, sp.life * 2);
+          if (sp.life <= 0) {
+            scene.remove(sp.group);
+            activeSplashes.splice(i, 1);
+          }
+          continue;
+        }
+
+        sp.life -= 0.0055; // Lingers ~3 seconds so you can read wind drift on the splash
+        sp.group.position.x += driftX;
+        sp.group.children[0].scale.addScalar(0.025); // Core cloud expands
+        sp.group.children[0].position.y += 0.018;
+        sp.group.children[1].scale.y += 0.045;    // Vertical dirt column shoots upward
+        sp.group.children[1].position.y += 0.032;
+
+        // Animate flying dirt clods
+        sp.particles.forEach(pt => {
+          pt.mesh.position.x += pt.vx * 0.025;
+          pt.mesh.position.y += pt.vy * 0.025;
+          pt.mesh.position.z += pt.vz * 0.025;
+          pt.vy -= 9.8 * 0.025;
+          if (pt.mesh.position.y < 0) pt.mesh.position.y = 0;
+        });
+
+        sp.coreMat.opacity = Math.max(0, sp.life * 0.92);
+        sp.plumeMat.opacity = Math.max(0, sp.life * 0.85);
+
+        if (sp.life <= 0) {
+          scene.remove(sp.group);
+          activeSplashes.splice(i, 1);
         }
       }
 
-      // Update Breath Hold & Sway
       const { o, chs } = getEquipped();
       if (state.holdingBreath && state.oxygen > 0) {
         state.oxygen = Math.max(0, state.oxygen - 0.38);
@@ -1484,7 +1542,6 @@
       const totalYaw = state.yawRad + state.swayX + state.recoilYaw;
       const totalPitch = state.pitchRad + state.swayY + state.recoilPitch;
 
-      // Orient 3D Rifle Rig & Cameras
       const euler = new THREE.Euler(totalPitch, totalYaw, 0, 'YXZ');
       rifleRig.quaternion.setFromEuler(euler);
 
@@ -1492,11 +1549,10 @@
       const H = retCanvas.height;
       rCtx.clearRect(0, 0, W, H);
 
+      const opticFovDeg = 2 * Math.atan(Math.tan((SCOPE_BASE_FOV_DEG * Math.PI / 180) / 2) / state.zoom) * (180 / Math.PI);
+
       if (state.adsMode) {
-        // FULL SCOPE ADS VIEW: True optical FOV narrowing with magnification
         rifleRig.visible = false;
-        const baseFovDeg = 32.0;
-        const opticFovDeg = 2 * Math.atan(Math.tan((baseFovDeg * Math.PI / 180) / 2) / state.zoom) * (180 / Math.PI);
         scopeCamera.fov = opticFovDeg;
         scopeCamera.aspect = W / H;
         scopeCamera.position.set(0, 0, 0);
@@ -1509,7 +1565,6 @@
 
         drawScopeOverlay(W, H, opticFovDeg, o, false);
       } else {
-        // 1X PERIPHERAL VIEW + PICTURE-IN-PICTURE SCOPE LENS
         rifleRig.visible = true;
         mainCamera.position.set(0, 0.055, 0.18);
         mainCamera.quaternion.copy(rifleRig.quaternion);
@@ -1518,13 +1573,10 @@
         renderer.setScissorTest(false);
         renderer.render(scene, mainCamera);
 
-        // Render High-Zoom Scope Camera inside Center Circular Scissor Box
-        const pipSize = Math.round(Math.min(W, H) * 0.54);
+        const pipSize = Math.round(Math.min(W, H) * 0.56);
         const pipX = Math.round((W - pipSize) / 2);
         const pipY = Math.round((H - pipSize) / 2);
 
-        const baseFovDeg = 32.0;
-        const opticFovDeg = 2 * Math.atan(Math.tan((baseFovDeg * Math.PI / 180) / 2) / state.zoom) * (180 / Math.PI);
         scopeCamera.fov = opticFovDeg;
         scopeCamera.aspect = 1.0;
         scopeCamera.position.set(0, 0, 0);
@@ -1546,24 +1598,20 @@
     function drawScopeOverlay(W, H, opticFovDeg, o, isPiP, pipSize = 0) {
       const cx = W / 2;
       const cy = H / 2;
-      const scopeRadius = isPiP ? (pipSize / 2) : (Math.min(cx, cy) - 18);
+      const scopeRadius = isPiP ? (pipSize / 2) : (Math.min(cx, cy) - 16);
 
-      // Compute exact pixels per 1.0 MRAD based on vertical FOV of the scope camera
       const scopeViewHeightPx = isPiP ? pipSize : H;
       const verticalFovRad = opticFovDeg * (Math.PI / 180);
       const pxPerTrueMrad = (scopeViewHeightPx / 2) / Math.tan(verticalFovRad / 2) * 0.001;
 
-      // Mask corners of the square PiP render into a crisp circular scope lens
       rCtx.save();
       if (isPiP) {
-        // Mask the square corners of the PiP scissor box with a thick black scope housing ring
         rCtx.strokeStyle = '#090b0e';
         rCtx.lineWidth = scopeRadius * 0.58;
         rCtx.beginPath();
         rCtx.arc(cx, cy, scopeRadius * 1.18, 0, Math.PI * 2);
         rCtx.stroke();
       } else {
-        // Full ADS outer black ocular housing
         rCtx.fillStyle = '#090b0e';
         rCtx.beginPath();
         rCtx.rect(0, 0, W, H);
@@ -1571,80 +1619,148 @@
         rCtx.fill();
       }
 
-      // Clip reticle drawing strictly inside circular lens
       rCtx.beginPath();
       rCtx.arc(cx, cy, scopeRadius, 0, Math.PI * 2);
       rCtx.clip();
 
-      // Subtle optical edge shadow
-      const vig = rCtx.createRadialGradient(cx, cy, scopeRadius * 0.72, cx, cy, scopeRadius);
+      // Optical edge vignette
+      const vig = rCtx.createRadialGradient(cx, cy, scopeRadius * 0.74, cx, cy, scopeRadius);
       vig.addColorStop(0, 'rgba(0,0,0,0)');
-      vig.addColorStop(1, 'rgba(0,0,0,0.6)');
+      vig.addColorStop(1, 'rgba(0,0,0,0.62)');
       rCtx.fillStyle = vig;
       rCtx.fillRect(cx - scopeRadius, cy - scopeRadius, scopeRadius * 2, scopeRadius * 2);
 
-      // SFP vs FFP Reticle Scale
-      const baseFov10x = 2 * Math.atan(Math.tan((32.0 * Math.PI / 180) / 2) / 10.0);
+      // SFP calibrated at 10x; FFP scales dynamically with zoom
+      const baseFov10x = 2 * Math.atan(Math.tan((SCOPE_BASE_FOV_DEG * Math.PI / 180) / 2) / 10.0);
       const pxPer10xMrad = (scopeViewHeightPx / 2) / Math.tan(baseFov10x / 2) * 0.001;
-      const retPxPerMrad = o.ffp ? pxPerTrueMrad : pxPer10xMrad;
+      const mradPx = o.ffp ? pxPerTrueMrad : pxPer10xMrad;
 
-      rCtx.strokeStyle = '#090b0e';
-      rCtx.fillStyle = '#090b0e';
-      rCtx.lineWidth = 1.4;
-
-      // Main Crosshairs
-      rCtx.beginPath();
-      rCtx.moveTo(cx, cy - scopeRadius); rCtx.lineTo(cx, cy + scopeRadius);
-      rCtx.moveTo(cx - scopeRadius, cy); rCtx.lineTo(cx + scopeRadius, cy);
-      rCtx.stroke();
+      rCtx.strokeStyle = 'rgba(10, 12, 16, 0.92)';
+      rCtx.fillStyle = 'rgba(10, 12, 16, 0.92)';
+      rCtx.font = `600 ${Math.max(9, Math.round(mradPx * 0.24))}px sans-serif`;
+      rCtx.textAlign = 'center';
+      rCtx.textBaseline = 'middle';
 
       if (o.reticle === 'mildot') {
-        for (let m = -10; m <= 10; m++) {
+        // Authentic 3-10x SFP Mil-Dot with heavy outer duplex posts at +/- 5 MRAD
+        rCtx.lineWidth = 1.1;
+        rCtx.beginPath();
+        rCtx.moveTo(cx, cy - scopeRadius); rCtx.lineTo(cx, cy + scopeRadius);
+        rCtx.moveTo(cx - scopeRadius, cy); rCtx.lineTo(cx + scopeRadius, cy);
+        rCtx.stroke();
+
+        // Heavy outer duplex bars beyond 5 MRAD
+        const postStart = 5 * mradPx;
+        rCtx.lineWidth = Math.max(3.5, mradPx * 0.12);
+        rCtx.beginPath();
+        rCtx.moveTo(cx - scopeRadius, cy); rCtx.lineTo(cx - postStart, cy);
+        rCtx.moveTo(cx + postStart, cy); rCtx.lineTo(cx + scopeRadius, cy);
+        rCtx.moveTo(cx, cy + postStart); rCtx.lineTo(cx, cy + scopeRadius);
+        rCtx.stroke();
+
+        // True 0.20 MRAD diameter oval mil-dots at 1, 2, 3, 4 MRAD
+        const dotR = Math.max(1.8, mradPx * 0.10);
+        for (let m = -4; m <= 4; m++) {
           if (m === 0) continue;
-          const p = m * retPxPerMrad;
+          const p = m * mradPx;
           rCtx.beginPath();
-          rCtx.arc(cx + p, cy, 2.4, 0, Math.PI * 2);
-          rCtx.arc(cx, cy + p, 2.4, 0, Math.PI * 2);
+          rCtx.ellipse(cx + p, cy, dotR * 1.15, dotR * 0.85, 0, 0, Math.PI * 2);
+          rCtx.fill();
+          rCtx.beginPath();
+          rCtx.ellipse(cx, cy + p, dotR * 0.85, dotR * 1.15, 0, 0, Math.PI * 2);
           rCtx.fill();
         }
       } else if (o.reticle === 'simple_tree') {
-        for (let m = -12; m <= 12; m += 0.5) {
-          if (m === 0) continue;
-          const p = m * retPxPerMrad;
-          const tick = Number.isInteger(m) ? 5 : 2.5;
+        // 5-15x FFP Simple Christmas Tree (0.5 MRAD hashes + numbered stadia)
+        rCtx.lineWidth = 1.1;
+        rCtx.beginPath();
+        rCtx.moveTo(cx, cy - scopeRadius); rCtx.lineTo(cx, cy + scopeRadius);
+        rCtx.moveTo(cx - scopeRadius, cy); rCtx.lineTo(cx + scopeRadius, cy);
+        rCtx.stroke();
+
+        for (let m = -10; m <= 10; m += 0.5) {
+          const mr = parseFloat(m.toFixed(1));
+          if (mr === 0) continue;
+          const p = mr * mradPx;
+          const isWhole = Number.isInteger(mr);
+          const halfTick = isWhole ? (mradPx * 0.18) : (mradPx * 0.09);
+
+          rCtx.lineWidth = isWhole ? 1.3 : 1.0;
           rCtx.beginPath();
-          rCtx.moveTo(cx + p, cy - tick); rCtx.lineTo(cx + p, cy + tick);
-          rCtx.moveTo(cx - tick, cy + p); rCtx.lineTo(cx + tick, cy + p);
+          rCtx.moveTo(cx + p, cy - halfTick); rCtx.lineTo(cx + p, cy + halfTick);
+          rCtx.moveTo(cx - halfTick, cy + p); rCtx.lineTo(cx + halfTick, cy + p);
           rCtx.stroke();
 
-          if (m >= 1 && Number.isInteger(m)) {
-            const maxW = Math.min(m, 6);
+          // Stadia numbers every 2 MRAD
+          if (isWhole && Math.abs(mr) % 2 === 0 && Math.abs(mr) <= 8) {
+            if (mr > 0) rCtx.fillText(`${mr}`, cx - mradPx * 0.42, cy + p);
+            rCtx.fillText(`${Math.abs(mr)}`, cx + p, cy - mradPx * 0.36);
+          }
+
+          // Clean inverted pyramid wind dots below center
+          if (mr >= 1 && isWhole && mr <= 8) {
+            const maxW = Math.min(Math.ceil(mr * 0.6), 4);
             for (let w = -maxW; w <= maxW; w++) {
               if (w === 0) continue;
               rCtx.beginPath();
-              rCtx.arc(cx + w * retPxPerMrad, cy + p, 1.5, 0, Math.PI * 2);
+              rCtx.arc(cx + w * mradPx, cy + p, Math.max(1.3, mradPx * 0.045), 0, Math.PI * 2);
               rCtx.fill();
             }
           }
         }
       } else {
+        // 5-25x Full Christmas Tree & 6-36x ELR Tree (0.2 MRAD sub-tensions + floating center dot)
         const maxM = o.reticle === 'elr_tree' ? 16 : 12;
+
+        // Open center gap with crisp 0.05 MRAD floating dot
+        const centerGap = mradPx * 0.25;
+        rCtx.lineWidth = 1.0;
+        rCtx.beginPath();
+        rCtx.moveTo(cx, cy - scopeRadius); rCtx.lineTo(cx, cy - centerGap);
+        rCtx.moveTo(cx, cy + centerGap); rCtx.lineTo(cx, cy + scopeRadius);
+        rCtx.moveTo(cx - scopeRadius, cy); rCtx.lineTo(cx - centerGap, cy);
+        rCtx.moveTo(cx + centerGap, cy); rCtx.lineTo(cx + scopeRadius, cy);
+        rCtx.stroke();
+
+        // Floating center dot
+        rCtx.beginPath();
+        rCtx.arc(cx, cy, Math.max(1.4, mradPx * 0.035), 0, Math.PI * 2);
+        rCtx.fill();
+
         for (let m = -maxM; m <= maxM; m += 0.2) {
           const mr = parseFloat(m.toFixed(1));
-          if (mr === 0) continue;
-          const p = mr * retPxPerMrad;
-          const tick = Number.isInteger(mr) ? 6 : 2.5;
+          if (Math.abs(mr) < 0.3) continue;
+          const p = mr * mradPx;
+          const isWhole = Number.isInteger(mr);
+          const isHalf = Number.isInteger(mr * 2) && !isWhole;
+          const halfTick = isWhole ? (mradPx * 0.20) : (isHalf ? mradPx * 0.12 : mradPx * 0.065);
+
+          rCtx.lineWidth = isWhole ? 1.3 : 0.9;
           rCtx.beginPath();
-          rCtx.moveTo(cx + p, cy - tick); rCtx.lineTo(cx + p, cy + tick);
-          rCtx.moveTo(cx - tick, cy + p); rCtx.lineTo(cx + tick, cy + p);
+          rCtx.moveTo(cx + p, cy - halfTick); rCtx.lineTo(cx + p, cy + halfTick);
+          rCtx.moveTo(cx - halfTick, cy + p); rCtx.lineTo(cx + halfTick, cy + p);
           rCtx.stroke();
 
-          if (mr >= 1 && Number.isInteger(mr)) {
-            const maxW = Math.min(mr + 1, 8);
+          // Numbered elevation & windage stadia every 2 MRAD
+          if (isWhole && Math.abs(mr) % 2 === 0) {
+            if (mr > 0) rCtx.fillText(`${mr}`, cx - mradPx * 0.45, cy + p);
+            if (Math.abs(mr) <= 10) rCtx.fillText(`${Math.abs(mr)}`, cx + p, cy - mradPx * 0.38);
+          }
+
+          // Full cascading Christmas tree wind holdover grid (0.5 MRAD spacing)
+          if (mr >= 1 && isWhole) {
+            const maxW = Math.min(Math.floor(mr * 0.65) + 1, 8);
             for (let w = -maxW; w <= maxW; w += 0.5) {
               if (w === 0) continue;
+              const isWholeW = Number.isInteger(w);
               rCtx.beginPath();
-              rCtx.arc(cx + w * retPxPerMrad, cy + p, Number.isInteger(w) ? 1.7 : 1.0, 0, Math.PI * 2);
+              rCtx.arc(
+                cx + w * mradPx,
+                cy + p,
+                isWholeW ? Math.max(1.5, mradPx * 0.045) : Math.max(0.9, mradPx * 0.025),
+                0,
+                Math.PI * 2
+              );
               rCtx.fill();
             }
           }
@@ -1741,7 +1857,6 @@
       else kesBtn.classList.add('locked');
     }
 
-    // Drag to pan 3D rifle across valley
     let dragging = false, lastX = 0, lastY = 0;
     threeCanvas.addEventListener('pointerdown', e => {
       dragging = true;
@@ -1754,13 +1869,12 @@
       const dy = e.clientY - lastY;
       lastX = e.clientX;
       lastY = e.clientY;
-      const sens = (state.adsMode ? 0.00025 : 0.0012) / (state.zoom / 10);
+      const sens = (state.adsMode ? 0.00018 : 0.0010) / (state.zoom / 10);
       state.yawRad = Math.max(-0.35, Math.min(0.35, state.yawRad - dx * sens));
       state.pitchRad = Math.max(-0.15, Math.min(0.25, state.pitchRad - dy * sens));
     });
     window.addEventListener('pointerup', () => dragging = false);
 
-    // Keyboard binds
     window.addEventListener('keydown', e => {
       if (document.activeElement.tagName === 'INPUT') return;
       if (e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') stepTurret('elev', +0.1);
@@ -1852,11 +1966,10 @@
       renderArmory();
     }
 
-    // Boot
     loadProgress();
     updateRifleAppearance();
     updateTopUI();
-    snapToTarget('1'); // Start aimed at 550 yd Full IPSC
+    snapToTarget('1');
     requestAnimationFrame(animate);
   </script>
 </body>

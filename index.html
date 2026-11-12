@@ -771,8 +771,9 @@
     scene.background = new THREE.Color(0x88b4dc);
     scene.fog = new THREE.FogExp2(0x9ec0de, 0.00032);
 
-    const mainCamera = new THREE.PerspectiveCamera(42, 16 / 10, 0.5, 3500);
-    const scopeCamera = new THREE.PerspectiveCamera(2.0, 1, 1.5, 3500);
+    const mainCamera = new THREE.PerspectiveCamera(42, 16 / 10, 0.5, 2500);
+    // Near plane set to 5.0m to maximize 24-bit depth buffer precision at 1000–2000 yd
+    const scopeCamera = new THREE.PerspectiveCamera(2.0, 1, 5.0, 2500);
 
     const hemiLight = new THREE.HemisphereLight(0xdceeff, 0x4d5d38, 0.85);
     scene.add(hemiLight);
@@ -904,7 +905,15 @@
     // =========================================================================
     // 6. DYNAMIC 3D STEEL TARGET ASSEMBLY & BERM GEOMETRY
     // =========================================================================
-    const steelFaceMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.38, metalness: 0.25 });
+    // PolygonOffset + clean Z separation prevents any black Z-fighting pixelation at 1000–2000 yd
+    const steelFaceMat = new THREE.MeshStandardMaterial({
+      color: 0xf8fafc,
+      roughness: 0.38,
+      metalness: 0.25,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2
+    });
     const steelRimMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.7 });
     const postMat = new THREE.MeshStandardMaterial({ color: 0x2d3748, roughness: 0.8 });
     const bermMat = new THREE.MeshStandardMaterial({ color: 0x6e5539, roughness: 0.95 });
@@ -940,7 +949,7 @@
     rangeAssembly.add(leftLeg, rightLeg, topBar);
 
     const plateHolder = new THREE.Group();
-    plateHolder.position.set(0, 1.05, 0.06);
+    plateHolder.position.set(0, 1.05, 0.08);
     rangeAssembly.add(plateHolder);
 
     const flagPole = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.95, 6), postMat);
@@ -981,15 +990,15 @@
       rangeAssembly.position.set(0, groundY, zPos);
 
       const centerHeightY = 1.05;
-      activeTargetSpec.worldCenter.set(0, groundY + centerHeightY, zPos + 0.06);
+      activeTargetSpec.worldCenter.set(0, groundY + centerHeightY, zPos + 0.08);
       activeTargetSpec.groundY = groundY;
       activeTargetSpec.standZ = zPos;
 
       const chainMat = new THREE.MeshStandardMaterial({ color: 0x1a202c });
       const leftChain = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.65, 6), chainMat);
-      leftChain.position.set(-0.18, 0.38, -0.02);
+      leftChain.position.set(-0.18, 0.38, -0.04);
       const rightChain = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.65, 6), chainMat);
-      rightChain.position.set(0.18, 0.38, -0.02);
+      rightChain.position.set(0.18, 0.38, -0.04);
       plateHolder.add(leftChain, rightChain);
 
       if (state.targetType === 'ipsc_full' || state.targetType === 'ipsc_23') {
@@ -1000,17 +1009,17 @@
         const torsoH = hM * 0.84;
         const torsoY = -hM * 0.08;
         const torsoBack = new THREE.Mesh(new THREE.BoxGeometry(wM + 0.03, torsoH + 0.03, 0.02), steelRimMat);
-        torsoBack.position.set(0, torsoY, -0.02);
+        torsoBack.position.set(0, torsoY, -0.05);
         const torsoFace = new THREE.Mesh(new THREE.BoxGeometry(wM, torsoH, 0.025), steelFaceMat);
-        torsoFace.position.set(0, torsoY, 0.01);
+        torsoFace.position.set(0, torsoY, 0.02);
 
         const headW = wM * 0.50;
         const headH = hM * 0.16;
         const headY = torsoY + (torsoH / 2) + (headH / 2);
         const headBack = new THREE.Mesh(new THREE.BoxGeometry(headW + 0.03, headH + 0.03, 0.02), steelRimMat);
-        headBack.position.set(0, headY, -0.02);
+        headBack.position.set(0, headY, -0.05);
         const headFace = new THREE.Mesh(new THREE.BoxGeometry(headW, headH, 0.025), steelFaceMat);
-        headFace.position.set(0, headY, 0.01);
+        headFace.position.set(0, headY, 0.02);
 
         plateHolder.add(torsoBack, torsoFace, headBack, headFace);
 
@@ -1023,9 +1032,9 @@
         const radM = diaM / 2;
 
         const rimDisc = new THREE.Mesh(new THREE.CircleGeometry(radM + 0.025, 32), steelRimMat);
-        rimDisc.position.set(0, 0, -0.01);
+        rimDisc.position.set(0, 0, -0.04);
         const faceDisc = new THREE.Mesh(new THREE.CircleGeometry(radM, 32), steelFaceMat);
-        faceDisc.position.set(0, 0, 0.02);
+        faceDisc.position.set(0, 0, 0.03);
 
         plateHolder.add(rimDisc, faceDisc);
 
@@ -1148,7 +1157,7 @@
       });
       const sparkMesh = new THREE.Mesh(new THREE.SphereGeometry(sparkR, 10, 10), sparkMat);
       sparkMesh.position.copy(posWorld);
-      sparkMesh.position.z += 0.06;
+      sparkMesh.position.z += 0.08;
       scene.add(sparkMesh);
 
       activeSplashes.push({
@@ -1161,18 +1170,24 @@
 
     function spawn3DImpactDecal(posWorld, isHit, isBermHit = false) {
       const distM = Math.max(200, Math.abs(posWorld.z));
-      // Berm/ground crater radius scaled to 1/10th size (~1.5–2 inches) with a lighter disturbed-earth brown
       const r = isHit ? 0.025 : Math.max(0.022, distM * 0.000032);
       const geo = new THREE.CircleGeometry(r, 12);
-      const mat = new THREE.MeshBasicMaterial({ color: isHit ? 0x1a202c : 0x57412b });
+      const mat = new THREE.MeshBasicMaterial({
+        color: isHit ? 0x1a202c : 0x57412b,
+        polygonOffset: true,
+        polygonOffsetFactor: -4,
+        polygonOffsetUnits: -4
+      });
       const decal = new THREE.Mesh(geo, mat);
       decal.position.copy(posWorld);
-      if (isBermHit) {
+      if (isHit) {
+        decal.position.z += 0.05;
+      } else if (isBermHit) {
         decal.rotation.x = -0.55;
-        decal.position.z += 0.06;
-        decal.position.y += 0.025;
+        decal.position.z += 0.08;
+        decal.position.y += 0.03;
       } else {
-        decal.position.z += 0.035;
+        decal.position.z += 0.04;
       }
       scene.add(decal);
       activeDecals.push(decal);

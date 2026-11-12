@@ -772,7 +772,6 @@
     scene.fog = new THREE.FogExp2(0x9ec0de, 0.00032);
 
     const mainCamera = new THREE.PerspectiveCamera(42, 16 / 10, 0.5, 3500);
-    // Near plane set to 1.5m to prevent telephoto depth-buffer Z-fighting at 1000–2000 yd
     const scopeCamera = new THREE.PerspectiveCamera(2.0, 1, 1.5, 3500);
 
     const hemiLight = new THREE.HemisphereLight(0xdceeff, 0x4d5d38, 0.85);
@@ -781,6 +780,23 @@
     const sunLight = new THREE.DirectionalLight(0xfff4e0, 1.15);
     sunLight.position.set(180, 320, 120);
     scene.add(sunLight);
+
+    // Procedural Soft Radial Dust Sprite Texture (No hard ball edges)
+    function createDustTexture() {
+      const c = document.createElement('canvas');
+      c.width = 128;
+      c.height = 128;
+      const ctx = c.getContext('2d');
+      const grad = ctx.createRadialGradient(64, 64, 4, 64, 64, 62);
+      grad.addColorStop(0.0, 'rgba(235, 218, 185, 0.95)');
+      grad.addColorStop(0.35, 'rgba(212, 190, 152, 0.65)');
+      grad.addColorStop(0.7, 'rgba(185, 160, 122, 0.22)');
+      grad.addColorStop(1.0, 'rgba(185, 160, 122, 0.0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 128, 128);
+      return new THREE.CanvasTexture(c);
+    }
+    const DUST_TEXTURE = createDustTexture();
 
     function getTerrainHeight(x, z) {
       const distM = Math.max(0, -z);
@@ -887,7 +903,7 @@
     }
 
     // =========================================================================
-    // 6. DYNAMIC 3D STEEL TARGET ASSEMBLY (CLEARLY SEPARATED FROM BERM)
+    // 6. DYNAMIC 3D STEEL TARGET ASSEMBLY
     // =========================================================================
     const steelFaceMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.38, metalness: 0.25 });
     const steelRimMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.7 });
@@ -899,19 +915,15 @@
     const rangeAssembly = new THREE.Group();
     scene.add(rangeAssembly);
 
-    // Leveled gravel pad under the target stand (z = 0) so stand legs sit cleanly
     const padMesh = new THREE.Mesh(new THREE.BoxGeometry(5.5, 0.3, 3.5), padMat);
     padMesh.position.set(0, -0.1, 0);
     rangeAssembly.add(padMesh);
 
-    // Backstop Berm placed 9.5m behind the target (front toe ends at z = -4.0m)
-    // Guarantees zero clipping or intersection with the target plate at z = 0
     const bermMesh = new THREE.Mesh(new THREE.ConeGeometry(8.5, 4.4, 16), bermMat);
     bermMesh.position.set(0, 1.8, -9.5);
     bermMesh.scale.set(1.6, 1.0, 0.65);
     rangeAssembly.add(bermMesh);
 
-    // T-Post & Crossbar Stand at z = 0
     const frameH = 1.75;
     const leftLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, frameH, 8), postMat);
     leftLeg.position.set(-0.55, frameH / 2, 0);
@@ -923,10 +935,9 @@
     rangeAssembly.add(leftLeg, rightLeg, topBar);
 
     const plateHolder = new THREE.Group();
-    plateHolder.position.set(0, 1.05, 0.06); // Slightly forward of T-post legs
+    plateHolder.position.set(0, 1.05, 0.06);
     rangeAssembly.add(plateHolder);
 
-    // Wind Flag beside target
     const flagPole = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.95, 6), postMat);
     flagPole.position.set(1.65, 0.97, 0);
     const flagPivot = new THREE.Group();
@@ -965,7 +976,6 @@
       const centerHeightY = 1.05;
       activeTargetSpec.worldCenter.set(0, groundY + centerHeightY, zPos + 0.06);
 
-      // Hanging chains
       const chainMat = new THREE.MeshStandardMaterial({ color: 0x1a202c });
       const leftChain = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.65, 6), chainMat);
       leftChain.position.set(-0.18, 0.38, -0.02);
@@ -1035,53 +1045,78 @@
       activeTraces.push({ line, mat, life: 1.0 });
     }
 
+    // Realistic V-Shaped Soft Sprite Dirt Plume (Replaces hard spheres/cones)
     function spawn3DDirtSplash(posWorld) {
       const distM = Math.max(200, Math.abs(posWorld.z));
-      const baseRadius = Math.max(0.55, distM * 0.0011);
+      const scaleUnit = Math.max(0.42, distM * 0.00085);
 
       const splashGroup = new THREE.Group();
       splashGroup.position.copy(posWorld);
 
-      const coreMat = new THREE.MeshBasicMaterial({
-        color: 0xf3e5ab,
-        transparent: true,
-        opacity: 0.92,
-        depthWrite: false
-      });
-      const coreMesh = new THREE.Mesh(new THREE.SphereGeometry(baseRadius, 12, 12), coreMat);
-      splashGroup.add(coreMesh);
+      const puffs = [];
+      const puffCount = 28;
 
-      const plumeMat = new THREE.MeshBasicMaterial({
-        color: 0xd9c29c,
-        transparent: true,
-        opacity: 0.85,
-        depthWrite: false
-      });
-      const plumeMesh = new THREE.Mesh(new THREE.ConeGeometry(baseRadius * 0.9, baseRadius * 2.8, 10), plumeMat);
-      plumeMesh.position.y = baseRadius * 1.1;
-      splashGroup.add(plumeMesh);
-
-      const particles = [];
-      const clodMat = new THREE.MeshBasicMaterial({ color: 0x4a3520 });
-      for (let p = 0; p < 10; p++) {
-        const clod = new THREE.Mesh(new THREE.BoxGeometry(baseRadius * 0.22, baseRadius * 0.22, baseRadius * 0.22), clodMat);
-        const angle = (p / 10) * Math.PI * 2;
-        const speed = baseRadius * (1.5 + Math.random() * 1.5);
-        particles.push({
-          mesh: clod,
-          vx: Math.cos(angle) * speed,
-          vy: baseRadius * (2.5 + Math.random() * 2.5),
-          vz: Math.sin(angle) * speed
+      for (let i = 0; i < puffCount; i++) {
+        // Fraction t along vertical column (0 = ground ejecta, 1 = high wispy top of plume)
+        const t = i / puffCount;
+        const spriteMat = new THREE.SpriteMaterial({
+          map: DUST_TEXTURE,
+          color: t < 0.35 ? 0xd8c39e : 0xeaddc5,
+          transparent: true,
+          opacity: 0.88 - t * 0.25,
+          depthWrite: false
         });
+        const sprite = new THREE.Sprite(spriteMat);
+
+        // V-shaped ejecta fan: tight near base, flaring slightly wider at top
+        const spreadAngle = (Math.random() - 0.5) * 0.42;
+        const zSpread = (Math.random() - 0.5) * 0.25;
+        const launchSpeedY = scaleUnit * (4.5 + t * 11.5 + Math.random() * 2.5);
+        const launchSpeedX = Math.sin(spreadAngle) * launchSpeedY * 0.38;
+        const launchSpeedZ = zSpread * launchSpeedY * 0.3;
+
+        const initSize = scaleUnit * (0.65 + t * 0.85 + Math.random() * 0.4);
+        sprite.scale.set(initSize, initSize, 1);
+        sprite.position.set(
+          (Math.random() - 0.5) * scaleUnit * 0.25,
+          t * scaleUnit * 0.4,
+          (Math.random() - 0.5) * scaleUnit * 0.25
+        );
+
+        splashGroup.add(sprite);
+        puffs.push({
+          sprite,
+          mat: spriteMat,
+          vx: launchSpeedX,
+          vy: launchSpeedY,
+          vz: launchSpeedZ,
+          growRate: scaleUnit * (0.9 + t * 1.1),
+          drag: 0.89 - t * 0.03,
+          baseOpacity: 0.85 - t * 0.25
+        });
+      }
+
+      // Small dark dirt clods ejected near the base
+      const clods = [];
+      const clodMat = new THREE.MeshBasicMaterial({ color: 0x3b2a1a });
+      for (let c = 0; c < 8; c++) {
+        const clod = new THREE.Mesh(new THREE.BoxGeometry(scaleUnit * 0.14, scaleUnit * 0.14, scaleUnit * 0.14), clodMat);
+        const ang = (Math.random() - 0.5) * 0.9;
+        const spd = scaleUnit * (4.0 + Math.random() * 4.5);
         splashGroup.add(clod);
+        clods.push({
+          mesh: clod,
+          vx: Math.sin(ang) * spd,
+          vy: spd * (1.2 + Math.random() * 0.8),
+          vz: (Math.random() - 0.5) * spd * 0.5
+        });
       }
 
       scene.add(splashGroup);
       activeSplashes.push({
         group: splashGroup,
-        coreMat,
-        plumeMat,
-        particles,
+        puffs,
+        clods,
         life: 1.0
       });
     }
@@ -1102,8 +1137,6 @@
       activeSplashes.push({
         group: sparkMesh,
         coreMat: sparkMat,
-        plumeMat: null,
-        particles: [],
         life: 0.45,
         isSpark: true
       });
@@ -1111,7 +1144,7 @@
 
     function spawn3DImpactDecal(posWorld, isHit) {
       const distM = Math.max(200, Math.abs(posWorld.z));
-      const r = isHit ? 0.028 : Math.max(0.18, distM * 0.00035);
+      const r = isHit ? 0.028 : Math.max(0.16, distM * 0.0003);
       const geo = new THREE.CircleGeometry(r, 12);
       const mat = new THREE.MeshBasicMaterial({ color: isHit ? 0x1a202c : 0x2b1d10 });
       const decal = new THREE.Mesh(geo, mat);
@@ -1508,7 +1541,8 @@
         }
       }
 
-      const driftX = -Math.sin((state.curWindClock * 30) * Math.PI / 180) * (state.curWindMph * 0.022);
+      // Animate soft V-shaped dust plume & downwind drift
+      const windDriftVelX = -Math.sin((state.curWindClock * 30) * Math.PI / 180) * (state.curWindMph * 0.08);
       for (let i = activeSplashes.length - 1; i >= 0; i--) {
         const sp = activeSplashes[i];
         if (sp.isSpark) {
@@ -1522,25 +1556,37 @@
           continue;
         }
 
-        sp.life -= 0.0055;
-        sp.group.position.x += driftX;
-        sp.group.children[0].scale.addScalar(0.025);
-        sp.group.children[0].position.y += 0.018;
-        sp.group.children[1].scale.y += 0.045;
-        sp.group.children[1].position.y += 0.032;
+        sp.life -= 0.0055; // Lingers ~3s so shooter can read wind drift on the plume
 
-        sp.particles.forEach(pt => {
-          pt.mesh.position.x += pt.vx * 0.025;
-          pt.mesh.position.y += pt.vy * 0.025;
-          pt.mesh.position.z += pt.vz * 0.025;
-          pt.vy -= 9.8 * 0.025;
-          if (pt.mesh.position.y < 0) pt.mesh.position.y = 0;
+        sp.puffs.forEach(pf => {
+          pf.sprite.position.x += (pf.vx + windDriftVelX * (1.0 - sp.life * 0.5)) * 0.016;
+          pf.sprite.position.y += pf.vy * 0.016;
+          pf.sprite.position.z += pf.vz * 0.016;
+
+          // Rapid upward air drag so plume shoots up sharply then hangs & billows
+          pf.vx *= pf.drag;
+          pf.vy *= pf.drag;
+          pf.vz *= pf.drag;
+
+          pf.sprite.scale.x += pf.growRate * 0.016;
+          pf.sprite.scale.y += pf.growRate * 0.018;
+          pf.mat.opacity = Math.max(0, sp.life * pf.baseOpacity);
         });
 
-        sp.coreMat.opacity = Math.max(0, sp.life * 0.92);
-        sp.plumeMat.opacity = Math.max(0, sp.life * 0.85);
+        sp.clods.forEach(cd => {
+          cd.mesh.position.x += cd.vx * 0.016;
+          cd.mesh.position.y += cd.vy * 0.016;
+          cd.mesh.position.z += cd.vz * 0.016;
+          cd.vy -= 9.8 * 0.016;
+          if (cd.mesh.position.y < 0) {
+            cd.mesh.position.y = 0;
+            cd.vx *= 0.5;
+            cd.vz *= 0.5;
+          }
+        });
 
         if (sp.life <= 0) {
+          sp.puffs.forEach(pf => pf.mat.dispose());
           scene.remove(sp.group);
           activeSplashes.splice(i, 1);
         }

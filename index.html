@@ -287,10 +287,10 @@
 
     .toolbar {
       display: grid;
-      grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
-      gap: 5px;
+      grid-template-columns: 1fr 1fr 1fr 1fr;
+      gap: 6px;
     }
-    .btn-tool { background: #262f3b; font-size: 0.72rem; padding: 9px 2px; }
+    .btn-tool { background: #262f3b; font-size: 0.74rem; padding: 9px 4px; }
     .btn-tool.locked { opacity: 0.45; cursor: not-allowed; }
     .btn-ads-btn { background: #2b4c7e; border-color: #3b6998; color: #ebf8ff; }
 
@@ -376,7 +376,7 @@
       <div class="hud-tr">
         <div>Elev: <b id="hud-elev" style="color:var(--accent);">0.0 MRAD</b></div>
         <div>Wind: <b id="hud-wind" style="color:var(--accent);">0.0 MRAD</b></div>
-        <div style="color:#4fd1c5;">O₂: <b id="hud-o2">100%</b> | Illum: <b id="hud-illum" style="color:#e2e8f0;">OFF</b></div>
+        <div style="color:#4fd1c5;">O₂: <b id="hud-o2">100%</b></div>
       </div>
 
       <div class="hud-bl">
@@ -506,7 +506,6 @@
       <!-- Utility Tools -->
       <div class="toolbar">
         <button class="btn-tool btn-ads-btn" onclick="toggleADS()">VIEW [V]</button>
-        <button class="btn-tool" onclick="cycleIllum()">ILLUM [I]</button>
         <button class="btn-tool" onclick="toggleWin('win-solver')">SOLVER</button>
         <button class="btn-tool locked" id="btn-kestrel" onclick="openKestrel()">KESTREL</button>
         <button class="btn-tool" onclick="openArmory()">ARMORY</button>
@@ -690,7 +689,6 @@
       yawRad: 0.0,
       pitchRad: 0.0,
       adsMode: true,
-      illumMode: 0, // 0 = OFF, 1 = DAYLIGHT RED, 2 = NV GREEN
 
       turretElev: 0.0,
       turretWind: 0.0,
@@ -703,8 +701,6 @@
       recoilYaw: 0,
       swayX: 0,
       swayY: 0,
-      plateSwingVel: 0,
-      plateSwingAngle: 0,
       inFlight: false
     };
 
@@ -761,7 +757,7 @@
     }
 
     // =========================================================================
-    // 4. PROCEDURAL PBR TEXTURES & THREE.JS HIGH-DETAIL SCENE
+    // 4. THREE.JS 3D SCENE, VALLEY TERRAIN, RIFLE MODEL & DYNAMIC TARGET STAND
     // =========================================================================
     const YD_TO_M = 0.9144;
     const IN_TO_M = 0.0254;
@@ -770,85 +766,20 @@
     const threeCanvas = document.getElementById('threeCanvas');
     const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.05;
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0xa4c3de, 0.00028);
+    scene.background = new THREE.Color(0x88b4dc);
+    scene.fog = new THREE.FogExp2(0x9ec0de, 0.00032);
 
-    const mainCamera = new THREE.PerspectiveCamera(42, 16 / 10, 0.25, 3800);
-    const scopeCamera = new THREE.PerspectiveCamera(2.0, 1, 1.5, 3800);
+    const mainCamera = new THREE.PerspectiveCamera(42, 16 / 10, 0.5, 3500);
+    const scopeCamera = new THREE.PerspectiveCamera(2.0, 1, 1.5, 3500);
 
-    // Procedural PBR Textures
-    function createTerrainDetailTexture() {
-      const c = document.createElement('canvas');
-      c.width = 512;
-      c.height = 512;
-      const ctx = c.getContext('2d');
-      ctx.fillStyle = '#808080';
-      ctx.fillRect(0, 0, 512, 512);
-      for (let i = 0; i < 18000; i++) {
-        const x = Math.random() * 512;
-        const y = Math.random() * 512;
-        const v = Math.floor(105 + Math.random() * 50);
-        ctx.fillStyle = `rgb(${v},${v + Math.floor(Math.random() * 6)},${v - 6})`;
-        ctx.fillRect(x, y, 2, 3);
-      }
-      const tex = new THREE.CanvasTexture(c);
-      tex.wrapS = THREE.RepeatWrapping;
-      tex.wrapT = THREE.RepeatWrapping;
-      tex.repeat.set(90, 140);
-      return tex;
-    }
+    const hemiLight = new THREE.HemisphereLight(0xdceeff, 0x4d5d38, 0.85);
+    scene.add(hemiLight);
 
-    function createBermDirtTexture() {
-      const c = document.createElement('canvas');
-      c.width = 256;
-      c.height = 256;
-      const ctx = c.getContext('2d');
-      ctx.fillStyle = '#73593c';
-      ctx.fillRect(0, 0, 256, 256);
-      for (let i = 0; i < 6500; i++) {
-        const x = Math.random() * 256;
-        const y = Math.random() * 256;
-        const shade = Math.random() > 0.5 ? 'rgba(45,32,18,0.28)' : 'rgba(165,135,98,0.25)';
-        ctx.fillStyle = shade;
-        ctx.fillRect(x, y, 2 + Math.random() * 3, 2);
-      }
-      const tex = new THREE.CanvasTexture(c);
-      tex.wrapS = THREE.RepeatWrapping;
-      tex.wrapT = THREE.RepeatWrapping;
-      tex.repeat.set(6, 3);
-      return tex;
-    }
-
-    function createSteelPlateTexture() {
-      const c = document.createElement('canvas');
-      c.width = 256;
-      c.height = 256;
-      const ctx = c.getContext('2d');
-      ctx.fillStyle = '#f1f5f9';
-      ctx.fillRect(0, 0, 256, 256);
-      // Subtle weathered paint speckles & metallic edge wear
-      for (let i = 0; i < 1200; i++) {
-        const x = Math.random() * 256;
-        const y = Math.random() * 256;
-        ctx.fillStyle = Math.random() > 0.3 ? 'rgba(148,163,184,0.18)' : 'rgba(71,85,105,0.22)';
-        ctx.fillRect(x, y, 2, 2);
-      }
-      ctx.strokeStyle = 'rgba(71, 85, 105, 0.55)';
-      ctx.lineWidth = 10;
-      ctx.strokeRect(0, 0, 256, 256);
-      // Bolt heads near top corners
-      ctx.fillStyle = '#334155';
-      ctx.beginPath();
-      ctx.arc(36, 28, 7, 0, Math.PI * 2);
-      ctx.arc(220, 28, 7, 0, Math.PI * 2);
-      ctx.fill();
-      return new THREE.CanvasTexture(c);
-    }
+    const sunLight = new THREE.DirectionalLight(0xfff4e0, 1.15);
+    sunLight.position.set(180, 320, 120);
+    scene.add(sunLight);
 
     function createDustTexture() {
       const c = document.createElement('canvas');
@@ -866,79 +797,24 @@
     }
     const DUST_TEXTURE = createDustTexture();
 
-    // Atmospheric Rayleigh Sky Dome Shader
-    const skyGeo = new THREE.SphereGeometry(3200, 32, 20);
-    const skyMat = new THREE.ShaderMaterial({
-      side: THREE.BackSide,
-      depthWrite: false,
-      uniforms: {
-        topColor: { value: new THREE.Color(0x2b588c) },
-        horizonColor: { value: new THREE.Color(0xc5dbee) },
-        sunDir: { value: new THREE.Vector3(0.45, 0.65, -0.55).normalize() }
-      },
-      vertexShader: `
-        varying vec3 vWorldPos;
-        void main() {
-          vec4 wp = modelMatrix * vec4(position, 1.0);
-          vWorldPos = wp.xyz;
-          gl_Position = projectionMatrix * viewMatrix * wp;
-        }
-      `,
-      fragmentShader: `
-        uniform vec3 topColor;
-        uniform vec3 horizonColor;
-        uniform vec3 sunDir;
-        varying vec3 vWorldPos;
-        void main() {
-          vec3 dir = normalize(vWorldPos);
-          float h = clamp(dir.y, 0.0, 1.0);
-          vec3 col = mix(horizonColor, topColor, pow(h, 0.55));
-          float sunAmt = max(dot(dir, sunDir), 0.0);
-          col += vec3(1.0, 0.92, 0.78) * pow(sunAmt, 64.0) * 0.45;
-          col += vec3(1.0, 0.95, 0.85) * pow(sunAmt, 6.0) * 0.12;
-          gl_FragColor = vec4(col, 1.0);
-        }
-      `
-    });
-    scene.add(new THREE.Mesh(skyGeo, skyMat));
-
-    // Three-Point / Sunlight + Hemisphere Fill with Soft Shadows
-    const hemiLight = new THREE.HemisphereLight(0xdceeff, 0x455432, 0.78);
-    scene.add(hemiLight);
-
-    const sunLight = new THREE.DirectionalLight(0xfff5e4, 1.25);
-    sunLight.position.set(160, 260, -140);
-    sunLight.castShadow = true;
-    sunLight.shadow.mapSize.width = 2048;
-    sunLight.shadow.mapSize.height = 2048;
-    sunLight.shadow.camera.near = 10;
-    sunLight.shadow.camera.far = 2500;
-    const d = 120;
-    sunLight.shadow.camera.left = -d;
-    sunLight.shadow.camera.right = d;
-    sunLight.shadow.camera.top = d;
-    sunLight.shadow.camera.bottom = -d;
-    sunLight.shadow.bias = -0.0005;
-    scene.add(sunLight);
-
     function getTerrainHeight(x, z) {
       const distM = Math.max(0, -z);
       const valleyWalls = Math.pow(Math.abs(x) / 140, 2.1) * 28;
       const rollingHills = Math.sin(x * 0.015) * Math.cos(z * 0.012) * 3.0;
-      const mountainBackdrop = distM > 1900 ? Math.pow((distM - 1900) / 300, 1.7) * 105 : 0;
+      const mountainBackdrop = distM > 1900 ? Math.pow((distM - 1900) / 300, 1.7) * 95 : 0;
       const firingBenchFlat = distM < 30 ? 0 : 1;
       return (valleyWalls + rollingHills + mountainBackdrop) * firingBenchFlat - 1.5;
     }
 
-    const terrainGeo = new THREE.PlaneGeometry(1600, 2800, 120, 160);
+    const terrainGeo = new THREE.PlaneGeometry(1600, 2800, 110, 150);
     terrainGeo.rotateX(-Math.PI / 2);
     terrainGeo.translate(0, 0, -1350);
 
     const posAttr = terrainGeo.attributes.position;
     const colors = [];
-    const cGrass = new THREE.Color(0x52663a);
-    const cDirt = new THREE.Color(0x7a6346);
-    const cRock = new THREE.Color(0x66727a);
+    const cGrass = new THREE.Color(0x56693d);
+    const cDirt = new THREE.Color(0x7c6548);
+    const cRock = new THREE.Color(0x69747c);
 
     for (let i = 0; i < posAttr.count; i++) {
       const vx = posAttr.getX(i);
@@ -948,151 +824,75 @@
 
       const c = cGrass.clone();
       if (vy > 35) c.lerp(cRock, Math.min(1, (vy - 35) / 50));
-      else if (Math.abs(vx) < 16 && vz < -250) c.lerp(cDirt, 0.35);
+      else if (Math.abs(vx) < 18 && vz < -250) c.lerp(cDirt, 0.35);
       colors.push(c.r, c.g, c.b);
     }
     terrainGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     terrainGeo.computeVertexNormals();
 
-    const detailTex = createTerrainDetailTexture();
     const terrainMesh = new THREE.Mesh(terrainGeo, new THREE.MeshStandardMaterial({
       vertexColors: true,
-      map: detailTex,
-      bumpMap: detailTex,
-      bumpScale: 0.35,
-      roughness: 0.94,
+      roughness: 0.92,
       metalness: 0.02
     }));
-    terrainMesh.receiveShadow = true;
     scene.add(terrainMesh);
 
-    // Distance Yardage Marker Boards along Range Lane
-    const markerDistances = [300, 500, 800, 1000, 1500];
-    markerDistances.forEach(yd => {
-      const mz = -yd * YD_TO_M;
-      const mx = -7.5;
-      const my = getTerrainHeight(mx, mz);
-
-      const post = new THREE.Mesh(
-        new THREE.BoxGeometry(0.12, 1.3, 0.12),
-        new THREE.MeshStandardMaterial({ color: 0x3b2c1e, roughness: 0.9 })
-      );
-      post.position.set(mx, my + 0.65, mz);
-      post.castShadow = true;
-
-      const boardC = document.createElement('canvas');
-      boardC.width = 128;
-      boardC.height = 64;
-      const bCtx = boardC.getContext('2d');
-      bCtx.fillStyle = '#e2e8f0';
-      bCtx.fillRect(0, 0, 128, 64);
-      bCtx.strokeStyle = '#1e293b';
-      bCtx.lineWidth = 6;
-      bCtx.strokeRect(0, 0, 128, 64);
-      bCtx.fillStyle = '#0f172a';
-      bCtx.font = 'bold 34px sans-serif';
-      bCtx.textAlign = 'center';
-      bCtx.textBaseline = 'middle';
-      bCtx.fillText(`${yd}`, 64, 34);
-
-      const sign = new THREE.Mesh(
-        new THREE.BoxGeometry(0.95, 0.48, 0.06),
-        new THREE.MeshStandardMaterial({ map: new THREE.CanvasTexture(boardC), roughness: 0.7 })
-      );
-      sign.position.set(mx, my + 1.15, mz);
-      sign.castShadow = true;
-      scene.add(post, sign);
-    });
-
-    // Multi-tiered Pine Trees along Valley Sides
-    const treeTrunkMat = new THREE.MeshStandardMaterial({ color: 0x453020, roughness: 0.92 });
-    const treeLeafMat = new THREE.MeshStandardMaterial({ color: 0x2a4023, roughness: 0.86 });
-    for (let i = 0; i < 170; i++) {
+    const treeTrunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3525, roughness: 0.9 });
+    const treeLeafMat = new THREE.MeshStandardMaterial({ color: 0x2f4527, roughness: 0.85 });
+    for (let i = 0; i < 160; i++) {
       const side = Math.random() > 0.5 ? 1 : -1;
-      const tx = side * (36 + Math.random() * 265);
+      const tx = side * (38 + Math.random() * 260);
       const tz = -(80 + Math.random() * 1950);
       const ty = getTerrainHeight(tx, tz);
-      const scale = 0.85 + Math.random() * 1.65;
+      const scale = 0.8 + Math.random() * 1.6;
 
       const treeGroup = new THREE.Group();
-      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.24 * scale, 0.42 * scale, 2.8 * scale, 6), treeTrunkMat);
-      trunk.position.y = 1.4 * scale;
-      trunk.castShadow = true;
-
-      const tier1 = new THREE.Mesh(new THREE.ConeGeometry(2.6 * scale, 4.8 * scale, 7), treeLeafMat);
-      tier1.position.y = 4.2 * scale;
-      tier1.castShadow = true;
-
-      const tier2 = new THREE.Mesh(new THREE.ConeGeometry(1.9 * scale, 4.2 * scale, 7), treeLeafMat);
-      tier2.position.y = 6.6 * scale;
-      tier2.castShadow = true;
-
-      treeGroup.add(trunk, tier1, tier2);
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.25 * scale, 0.4 * scale, 2.5 * scale, 6), treeTrunkMat);
+      trunk.position.y = 1.25 * scale;
+      const foliage = new THREE.Mesh(new THREE.ConeGeometry(2.4 * scale, 7.5 * scale, 7), treeLeafMat);
+      foliage.position.y = 5.5 * scale;
+      treeGroup.add(trunk, foliage);
       treeGroup.position.set(tx, ty, tz);
       scene.add(treeGroup);
     }
 
     // =========================================================================
-    // 5. DETAILED 3D RIFLE RIG & SHOOTING BENCH (VISIBLE IN 1X + PIP VIEW)
+    // 5. 3D RIFLE RIG
     // =========================================================================
-    const benchMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(1.4, 0.12, 1.2),
-      new THREE.MeshStandardMaterial({ color: 0x4a3b2c, roughness: 0.95 })
-    );
-    benchMesh.position.set(0, -0.32, -0.35);
-    benchMesh.receiveShadow = true;
-    scene.add(benchMesh);
-
     const rifleRig = new THREE.Group();
     rifleRig.position.set(0, 0, 0);
     scene.add(rifleRig);
 
-    const chassisMat = new THREE.MeshStandardMaterial({ color: 0x2b3036, roughness: 0.55, metalness: 0.45 });
-    const barrelMat = new THREE.MeshStandardMaterial({ color: 0x1a1e24, roughness: 0.3, metalness: 0.85 });
-    const scopeMat = new THREE.MeshStandardMaterial({ color: 0x101317, roughness: 0.38, metalness: 0.78 });
-    const accentMetalMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.3, metalness: 0.9 });
+    const chassisMat = new THREE.MeshStandardMaterial({ color: 0x2b3036, roughness: 0.65, metalness: 0.3 });
+    const barrelMat = new THREE.MeshStandardMaterial({ color: 0x1c2026, roughness: 0.35, metalness: 0.8 });
+    const scopeMat = new THREE.MeshStandardMaterial({ color: 0x111418, roughness: 0.4, metalness: 0.7 });
 
-    // Heavy Contoured Barrel + Fluting Striations
-    const barrelMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.020, 0.80, 20), barrelMat);
+    const barrelMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.019, 0.78, 16), barrelMat);
     barrelMesh.rotation.x = Math.PI / 2;
-    barrelMesh.position.set(0, -0.045, -0.46);
+    barrelMesh.position.set(0, -0.045, -0.45);
     rifleRig.add(barrelMesh);
 
-    // Multi-Port Tactical Muzzle Brake
-    const brakeMesh = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.028, 0.072), barrelMat);
-    brakeMesh.position.set(0, -0.045, -0.88);
+    const brakeMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.017, 0.065, 16), barrelMat);
+    brakeMesh.rotation.x = Math.PI / 2;
+    brakeMesh.position.set(0, -0.045, -0.86);
     rifleRig.add(brakeMesh);
 
-    // Chassis Forend & Arca Swiss Rail
-    const forendMesh = new THREE.Mesh(new THREE.BoxGeometry(0.054, 0.042, 0.50), chassisMat);
-    forendMesh.position.set(0, -0.072, -0.33);
+    const forendMesh = new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.042, 0.48), chassisMat);
+    forendMesh.position.set(0, -0.072, -0.32);
     rifleRig.add(forendMesh);
 
-    const arcaRailMesh = new THREE.Mesh(new THREE.BoxGeometry(0.038, 0.008, 0.52), accentMetalMat);
-    arcaRailMesh.position.set(0, -0.095, -0.33);
-    rifleRig.add(arcaRailMesh);
-
-    // Scope Tube, Objective Bell & Magnification Throw Lever
-    const scopeTubeMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.030, 0.022, 0.38, 24), scopeMat);
+    const scopeTubeMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.022, 0.36, 20), scopeMat);
     scopeTubeMesh.rotation.x = Math.PI / 2;
-    scopeTubeMesh.position.set(0, 0.0, -0.25);
+    scopeTubeMesh.position.set(0, 0.0, -0.24);
     rifleRig.add(scopeTubeMesh);
 
-    const throwLeverMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.035, 8), accentMetalMat);
-    throwLeverMesh.rotation.z = -0.6;
-    throwLeverMesh.position.set(0.022, 0.018, -0.08);
-    rifleRig.add(throwLeverMesh);
+    const elevTurretMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.024, 16), scopeMat);
+    elevTurretMesh.position.set(0, 0.028, -0.16);
+    rifleRig.add(elevTurretMesh);
 
-    // Knurled Elevation & Windage Turret Drums
-    const elevTurretMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.017, 0.026, 24), scopeMat);
-    elevTurretMesh.position.set(0, 0.029, -0.16);
-    const elevCapRing = new THREE.Mesh(new THREE.CylinderGeometry(0.0175, 0.0175, 0.004, 24), accentMetalMat);
-    elevCapRing.position.set(0, 0.038, -0.16);
-    rifleRig.add(elevTurretMesh, elevCapRing);
-
-    const windTurretMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.017, 0.026, 24), scopeMat);
+    const windTurretMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.024, 16), scopeMat);
     windTurretMesh.rotation.z = Math.PI / 2;
-    windTurretMesh.position.set(0.029, 0.0, -0.16);
+    windTurretMesh.position.set(0.028, 0.0, -0.16);
     rifleRig.add(windTurretMesh);
 
     function updateRifleAppearance() {
@@ -1104,30 +904,18 @@
     // =========================================================================
     // 6. DYNAMIC 3D STEEL TARGET ASSEMBLY & BERM GEOMETRY
     // =========================================================================
-    const steelTex = createSteelPlateTexture();
-    const steelFaceMat = new THREE.MeshStandardMaterial({
-      map: steelTex,
-      roughness: 0.42,
-      metalness: 0.35
-    });
-    const steelRimMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.75, metalness: 0.5 });
-    const postMat = new THREE.MeshStandardMaterial({ color: 0x2d3748, roughness: 0.8, metalness: 0.4 });
-    const bermTex = createBermDirtTexture();
-    const bermMat = new THREE.MeshStandardMaterial({
-      map: bermTex,
-      bumpMap: bermTex,
-      bumpScale: 0.25,
-      roughness: 0.96
-    });
+    const steelFaceMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.38, metalness: 0.25 });
+    const steelRimMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.7 });
+    const postMat = new THREE.MeshStandardMaterial({ color: 0x2d3748, roughness: 0.8 });
+    const bermMat = new THREE.MeshStandardMaterial({ color: 0x6e5539, roughness: 0.95 });
     const padMat = new THREE.MeshStandardMaterial({ color: 0x4f4334, roughness: 0.98 });
-    const flagMat = new THREE.MeshStandardMaterial({ color: 0xe53e3e, side: THREE.DoubleSide, roughness: 0.65 });
+    const flagMat = new THREE.MeshStandardMaterial({ color: 0xe53e3e, side: THREE.DoubleSide, roughness: 0.7 });
 
     const rangeAssembly = new THREE.Group();
     scene.add(rangeAssembly);
 
     const padMesh = new THREE.Mesh(new THREE.BoxGeometry(5.5, 0.3, 3.5), padMat);
     padMesh.position.set(0, -0.1, 0);
-    padMesh.receiveShadow = true;
     rangeAssembly.add(padMesh);
 
     const BERM_LOCAL_Z = -9.5;
@@ -1136,42 +924,31 @@
     const BERM_RADIUS_X = 8.5 * 1.6;
     const BERM_RADIUS_Z = 8.5 * 0.65;
 
-    const bermMesh = new THREE.Mesh(new THREE.ConeGeometry(8.5, BERM_HEIGHT, 24), bermMat);
+    const bermMesh = new THREE.Mesh(new THREE.ConeGeometry(8.5, BERM_HEIGHT, 16), bermMat);
     bermMesh.position.set(0, BERM_BASE_Y + BERM_HEIGHT / 2, BERM_LOCAL_Z);
     bermMesh.scale.set(1.6, 1.0, 0.65);
-    bermMesh.receiveShadow = true;
     rangeAssembly.add(bermMesh);
 
     const frameH = 1.75;
     const leftLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, frameH, 8), postMat);
     leftLeg.position.set(-0.55, frameH / 2, 0);
-    leftLeg.castShadow = true;
     const rightLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, frameH, 8), postMat);
     rightLeg.position.set(0.55, frameH / 2, 0);
-    rightLeg.castShadow = true;
     const topBar = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 1.2, 8), postMat);
     topBar.rotation.z = Math.PI / 2;
     topBar.position.set(0, frameH, 0);
-    topBar.castShadow = true;
     rangeAssembly.add(leftLeg, rightLeg, topBar);
 
-    // Pivot plateHolder from the top crossbar so hits swing the steel plate realistically
-    const platePivot = new THREE.Group();
-    platePivot.position.set(0, frameH, 0.06);
-    rangeAssembly.add(platePivot);
-
     const plateHolder = new THREE.Group();
-    plateHolder.position.set(0, -0.70, 0); // Center sits at y = 1.75 - 0.70 = 1.05m
-    platePivot.add(plateHolder);
+    plateHolder.position.set(0, 1.05, 0.06);
+    rangeAssembly.add(plateHolder);
 
     const flagPole = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.95, 6), postMat);
     flagPole.position.set(1.65, 0.97, 0);
-    flagPole.castShadow = true;
     const flagPivot = new THREE.Group();
     flagPivot.position.set(1.65, 1.76, 0);
     const flagCloth = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.4), flagMat);
     flagCloth.position.set(0.5, 0, 0);
-    flagCloth.castShadow = true;
     flagPivot.add(flagCloth);
     rangeAssembly.add(flagPole, flagPivot);
 
@@ -1189,9 +966,7 @@
 
     function clearImpactDecals() {
       while (activeDecals.length > 0) {
-        const d = activeDecals.pop();
-        if (d.parent) d.parent.remove(d);
-        else scene.remove(d);
+        scene.remove(activeDecals.pop());
       }
     }
 
@@ -1200,9 +975,6 @@
         plateHolder.remove(plateHolder.children[0]);
       }
       clearImpactDecals();
-      state.plateSwingVel = 0;
-      state.plateSwingAngle = 0;
-      platePivot.rotation.x = 0;
 
       const zPos = -state.distanceYd * YD_TO_M;
       const groundY = getTerrainHeight(0, zPos);
@@ -1213,13 +985,11 @@
       activeTargetSpec.groundY = groundY;
       activeTargetSpec.standZ = zPos;
 
-      const chainMat = new THREE.MeshStandardMaterial({ color: 0x1a202c, metalness: 0.8, roughness: 0.4 });
+      const chainMat = new THREE.MeshStandardMaterial({ color: 0x1a202c });
       const leftChain = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.65, 6), chainMat);
       leftChain.position.set(-0.18, 0.38, -0.02);
-      leftChain.castShadow = true;
       const rightChain = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.65, 6), chainMat);
       rightChain.position.set(0.18, 0.38, -0.02);
-      rightChain.castShadow = true;
       plateHolder.add(leftChain, rightChain);
 
       if (state.targetType === 'ipsc_full' || state.targetType === 'ipsc_23') {
@@ -1231,20 +1001,16 @@
         const torsoY = -hM * 0.08;
         const torsoBack = new THREE.Mesh(new THREE.BoxGeometry(wM + 0.03, torsoH + 0.03, 0.02), steelRimMat);
         torsoBack.position.set(0, torsoY, -0.02);
-        torsoBack.castShadow = true;
         const torsoFace = new THREE.Mesh(new THREE.BoxGeometry(wM, torsoH, 0.025), steelFaceMat);
         torsoFace.position.set(0, torsoY, 0.01);
-        torsoFace.castShadow = true;
 
         const headW = wM * 0.50;
         const headH = hM * 0.16;
         const headY = torsoY + (torsoH / 2) + (headH / 2);
         const headBack = new THREE.Mesh(new THREE.BoxGeometry(headW + 0.03, headH + 0.03, 0.02), steelRimMat);
         headBack.position.set(0, headY, -0.02);
-        headBack.castShadow = true;
         const headFace = new THREE.Mesh(new THREE.BoxGeometry(headW, headH, 0.025), steelFaceMat);
         headFace.position.set(0, headY, 0.01);
-        headFace.castShadow = true;
 
         plateHolder.add(torsoBack, torsoFace, headBack, headFace);
 
@@ -1258,10 +1024,8 @@
 
         const rimDisc = new THREE.Mesh(new THREE.CircleGeometry(radM + 0.025, 32), steelRimMat);
         rimDisc.position.set(0, 0, -0.01);
-        rimDisc.castShadow = true;
         const faceDisc = new THREE.Mesh(new THREE.CircleGeometry(radM, 32), steelFaceMat);
         faceDisc.position.set(0, 0, 0.02);
-        faceDisc.castShadow = true;
 
         plateHolder.add(rimDisc, faceDisc);
 
@@ -1397,30 +1161,20 @@
 
     function spawn3DImpactDecal(posWorld, isHit, isBermHit = false) {
       const distM = Math.max(200, Math.abs(posWorld.z));
+      // Berm/ground crater radius scaled to 1/10th size (~1.5–2 inches) with a lighter disturbed-earth brown
       const r = isHit ? 0.025 : Math.max(0.022, distM * 0.000032);
       const geo = new THREE.CircleGeometry(r, 12);
       const mat = new THREE.MeshBasicMaterial({ color: isHit ? 0x1a202c : 0x57412b });
       const decal = new THREE.Mesh(geo, mat);
-
-      if (isHit) {
-        // Attach lead splash mark directly onto the swinging steel plate
-        decal.position.set(
-          posWorld.x - activeTargetSpec.worldCenter.x,
-          posWorld.y - activeTargetSpec.worldCenter.y,
-          0.026
-        );
-        plateHolder.add(decal);
+      decal.position.copy(posWorld);
+      if (isBermHit) {
+        decal.rotation.x = -0.55;
+        decal.position.z += 0.06;
+        decal.position.y += 0.025;
       } else {
-        decal.position.copy(posWorld);
-        if (isBermHit) {
-          decal.rotation.x = -0.55;
-          decal.position.z += 0.06;
-          decal.position.y += 0.025;
-        } else {
-          decal.position.z += 0.035;
-        }
-        scene.add(decal);
+        decal.position.z += 0.035;
       }
+      scene.add(decal);
       activeDecals.push(decal);
     }
 
@@ -1745,8 +1499,6 @@
         if (sim.isHit) {
           spawn3DSteelSpark(sim.hitPointWorld);
           spawn3DImpactDecal(sim.hitPointWorld, true, false);
-          // Apply physical pendulum impulse to the steel target plate
-          state.plateSwingVel -= 0.085 * (b.wt / 140);
 
           const multMap = {
             'ipsc_full': 1.0,
@@ -1774,7 +1526,7 @@
     }
 
     // =========================================================================
-    // 10. DUAL-CAMERA RENDER LOOP & HIGH-DETAIL OPTICAL SCOPE OVERLAY
+    // 10. DUAL-CAMERA RENDER LOOP & AUTHENTIC SCOPE RETICLE OVERLAY
     // =========================================================================
     const retCanvas = document.getElementById('reticleCanvas');
     const rCtx = retCanvas.getContext('2d');
@@ -1804,14 +1556,6 @@
       if (state.eq.wind === 'wind_3') {
         document.getElementById('kes-spd').innerText = `${state.curWindMph.toFixed(1)} MPH`;
         document.getElementById('kes-dir').innerText = `${state.curWindClock.toFixed(1)} Clock`;
-      }
-
-      // Steel Plate Pendulum Damping Physics
-      if (Math.abs(state.plateSwingAngle) > 0.0001 || Math.abs(state.plateSwingVel) > 0.0001) {
-        const springForce = -0.06 * state.plateSwingAngle;
-        state.plateSwingVel = (state.plateSwingVel + springForce) * 0.94;
-        state.plateSwingAngle += state.plateSwingVel;
-        platePivot.rotation.x = state.plateSwingAngle;
       }
 
       const showFlags = state.eq.wind === 'wind_2' || state.eq.wind === 'wind_3';
@@ -1915,7 +1659,6 @@
 
       if (state.adsMode) {
         rifleRig.visible = false;
-        benchMesh.visible = false;
         scopeCamera.fov = opticFovDeg;
         scopeCamera.aspect = W / H;
         scopeCamera.position.set(0, 0, 0);
@@ -1929,7 +1672,6 @@
         drawScopeOverlay(W, H, opticFovDeg, o, false);
       } else {
         rifleRig.visible = true;
-        benchMesh.visible = true;
         mainCamera.position.set(0, 0.055, 0.18);
         mainCamera.quaternion.copy(rifleRig.quaternion);
 
@@ -1987,51 +1729,18 @@
       rCtx.arc(cx, cy, scopeRadius, 0, Math.PI * 2);
       rCtx.clip();
 
-      // 1. Multi-Coated AR Optical Glass Tint & Subtle Chromatic Edge Fringing
-      const arGrad = rCtx.createRadialGradient(cx, cy, scopeRadius * 0.1, cx, cy, scopeRadius);
-      arGrad.addColorStop(0.0, 'rgba(16, 185, 129, 0.025)');
-      arGrad.addColorStop(0.82, 'rgba(14, 165, 233, 0.04)');
-      arGrad.addColorStop(0.95, 'rgba(6, 182, 212, 0.14)');
-      arGrad.addColorStop(1.0, 'rgba(239, 68, 68, 0.18)');
-      rCtx.fillStyle = arGrad;
-      rCtx.fillRect(cx - scopeRadius, cy - scopeRadius, scopeRadius * 2, scopeRadius * 2);
-
-      // 2. Dynamic Eye-Box Shadow (Shifts slightly under recoil impulse)
-      const eyeShiftX = -state.recoilYaw * 2400;
-      const eyeShiftY = state.recoilPitch * 2200;
-      const vig = rCtx.createRadialGradient(
-        cx + eyeShiftX, cy + eyeShiftY, scopeRadius * 0.72,
-        cx, cy, scopeRadius
-      );
+      const vig = rCtx.createRadialGradient(cx, cy, scopeRadius * 0.74, cx, cy, scopeRadius);
       vig.addColorStop(0, 'rgba(0,0,0,0)');
-      vig.addColorStop(0.75, 'rgba(0,0,0,0.22)');
-      vig.addColorStop(1, 'rgba(0,0,0,0.82)');
+      vig.addColorStop(1, 'rgba(0,0,0,0.62)');
       rCtx.fillStyle = vig;
       rCtx.fillRect(cx - scopeRadius, cy - scopeRadius, scopeRadius * 2, scopeRadius * 2);
 
-      // 3. Reticle Subtension Scale (SFP calibrated at 10x; FFP scales dynamically)
       const baseFov10x = 2 * Math.atan(Math.tan((SCOPE_BASE_FOV_DEG * Math.PI / 180) / 2) / 10.0);
       const pxPer10xMrad = (scopeViewHeightPx / 2) / Math.tan(baseFov10x / 2) * 0.001;
       const mradPx = o.ffp ? pxPerTrueMrad : pxPer10xMrad;
 
-      // Illuminated Reticle Styling
-      let mainStroke = 'rgba(10, 12, 16, 0.94)';
-      let glowColor = null;
-      if (state.illumMode === 1) {
-        mainStroke = '#ff2a2a';
-        glowColor = 'rgba(255, 42, 42, 0.75)';
-      } else if (state.illumMode === 2) {
-        mainStroke = '#22ff66';
-        glowColor = 'rgba(34, 255, 102, 0.75)';
-      }
-
-      rCtx.strokeStyle = mainStroke;
-      rCtx.fillStyle = mainStroke;
-      if (glowColor) {
-        rCtx.shadowColor = glowColor;
-        rCtx.shadowBlur = 6;
-      }
-
+      rCtx.strokeStyle = 'rgba(10, 12, 16, 0.92)';
+      rCtx.fillStyle = 'rgba(10, 12, 16, 0.92)';
       rCtx.font = `600 ${Math.max(9, Math.round(mradPx * 0.24))}px sans-serif`;
       rCtx.textAlign = 'center';
       rCtx.textBaseline = 'middle';
@@ -2043,10 +1752,6 @@
         rCtx.moveTo(cx - scopeRadius, cy); rCtx.lineTo(cx + scopeRadius, cy);
         rCtx.stroke();
 
-        // Outer heavy duplex posts remain dark etched metal
-        rCtx.save();
-        rCtx.shadowBlur = 0;
-        rCtx.strokeStyle = '#090b0e';
         const postStart = 5 * mradPx;
         rCtx.lineWidth = Math.max(3.5, mradPx * 0.12);
         rCtx.beginPath();
@@ -2054,7 +1759,6 @@
         rCtx.moveTo(cx + postStart, cy); rCtx.lineTo(cx + scopeRadius, cy);
         rCtx.moveTo(cx, cy + postStart); rCtx.lineTo(cx, cy + scopeRadius);
         rCtx.stroke();
-        rCtx.restore();
 
         const dotR = Math.max(1.8, mradPx * 0.10);
         for (let m = -4; m <= 4; m++) {
@@ -2155,18 +1859,8 @@
         }
       }
 
-      rCtx.shadowBlur = 0;
-
-      // Subtle inner ocular tube reflection ring
-      rCtx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-      rCtx.lineWidth = 2;
-      rCtx.beginPath();
-      rCtx.arc(cx, cy, scopeRadius - 2, 0, Math.PI * 2);
-      rCtx.stroke();
-
       rCtx.restore();
 
-      // Machined Scope Bezel Ring
       rCtx.strokeStyle = '#252c35';
       rCtx.lineWidth = isPiP ? 5 : 6;
       rCtx.beginPath();
@@ -2175,7 +1869,7 @@
     }
 
     // =========================================================================
-    // 11. CONTROLS, RANGE SETUP & ARMORY UI (UNCHANGED FUNCTIONALITY)
+    // 11. CONTROLS, RANGE SETUP & ARMORY UI
     // =========================================================================
     function changeRangeSetup() {
       state.targetType = document.getElementById('sel-target-type').value;
@@ -2188,21 +1882,6 @@
     function toggleADS() {
       state.adsMode = !state.adsMode;
       document.getElementById('hud-view-mode').innerText = state.adsMode ? 'SCOPE ADS' : '1X + PIP SCOPE';
-    }
-
-    function cycleIllum() {
-      state.illumMode = (state.illumMode + 1) % 3;
-      const el = document.getElementById('hud-illum');
-      if (state.illumMode === 0) {
-        el.innerText = 'OFF';
-        el.style.color = '#e2e8f0';
-      } else if (state.illumMode === 1) {
-        el.innerText = 'RED';
-        el.style.color = '#fc8181';
-      } else {
-        el.innerText = 'GREEN';
-        el.style.color = '#68d391';
-      }
     }
 
     function stepTurret(axis, delta) {
@@ -2289,7 +1968,6 @@
       if (e.key === 'x' || e.key === 'X') stepZoom(+1);
       if (e.key === 'z' || e.key === 'Z') stepZoom(-1);
       if (e.key === 'v' || e.key === 'V') toggleADS();
-      if (e.key === 'i' || e.key === 'I') cycleIllum();
       if (e.key === 'b' || e.key === 'B') setBreathHold(true);
       if (e.code === 'Space') { e.preventDefault(); fireRound(); }
     });

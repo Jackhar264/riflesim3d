@@ -211,7 +211,7 @@
 
     .range-bar {
       display: grid;
-      grid-template-columns: 1.3fr 0.9fr 0.8fr;
+      grid-template-columns: 1.2fr 1.1fr 0.75fr;
       gap: 6px;
     }
     select, button {
@@ -292,7 +292,7 @@
     }
     .btn-tool { background: #262f3b; font-size: 0.74rem; padding: 9px 4px; }
     .btn-tool.locked { opacity: 0.45; cursor: not-allowed; }
-    .btn-lrf { background: #2b4c7e; border-color: #3b6998; color: #ebf8ff; }
+    .btn-ads-btn { background: #2b4c7e; border-color: #3b6998; color: #ebf8ff; }
 
     .btn-fire {
       width: 100%;
@@ -368,7 +368,7 @@
       <canvas id="reticleCanvas"></canvas>
 
       <div class="hud-tl">
-        <div>LRF Range: <b id="hud-lrf" style="color:var(--accent);">550 YD</b></div>
+        <div>Dist: <b id="hud-dist" style="color:var(--accent);">500 YD</b></div>
         <div>Optic: <b id="hud-zoom">10.0x</b> <span id="hud-focal" style="color:var(--muted);">(SFP)</span></div>
         <div>Mode: <b id="hud-view-mode" style="color:#63b3ed;">SCOPE ADS</b></div>
       </div>
@@ -380,7 +380,7 @@
       </div>
 
       <div class="hud-bl">
-        <div class="shot-feedback" id="hud-feedback">DRAG TO AIM • [R] LASER RANGE • [SPACE] FIRE</div>
+        <div class="shot-feedback" id="hud-feedback">RANGE HOT — SELECT TARGET/DISTANCE & FIRE</div>
       </div>
 
       <!-- Collapsible Ballistic Solver Window -->
@@ -392,7 +392,7 @@
         <div class="solver-grid">
           <div>
             <label style="font-size:0.66rem; color:var(--muted);">Range (yd)</label>
-            <input type="number" id="sol-range" value="550" oninput="runPopSolver()">
+            <input type="number" id="sol-range" value="500" oninput="runPopSolver()">
           </div>
           <div>
             <label style="font-size:0.66rem; color:var(--muted);">Wind (mph)</label>
@@ -436,18 +436,27 @@
         <div class="ammo-cost" id="ui-ammo-cost">-$1.50/rd</div>
       </div>
 
-      <!-- Quick Target Snap & Wind Shift -->
+      <!-- Target Shape & Distance Selector (Matches 2D System) -->
       <div class="range-bar">
-        <select id="sel-snap-target" onchange="snapToTarget(this.value)">
-          <option value="0">350 yd — Full IPSC (1.0x)</option>
-          <option value="1" selected>550 yd — Full IPSC (1.0x)</option>
-          <option value="2">780 yd — 2/3 IPSC (1.6x)</option>
-          <option value="3">1,050 yd — 1.5 MOA Gong (3.0x)</option>
-          <option value="4">1,450 yd — 2/3 IPSC (1.6x)</option>
-          <option value="5">1,760 yd (1 Mi) — 1.5 MOA (3.0x)</option>
-          <option value="6">2,000 yd — 1.0 MOA Gong (5.0x)</option>
+        <select id="sel-target-type" onchange="changeRangeSetup()">
+          <option value="ipsc_full">Full IPSC (1.0x Pay)</option>
+          <option value="ipsc_23">2/3 IPSC (1.6x Pay)</option>
+          <option value="gong_15moa">1.5 MOA Gong (3.0x Pay)</option>
+          <option value="gong_10moa">1.0 MOA Gong (5.0x Pay)</option>
         </select>
-        <button onclick="toggleADS()" id="btn-ads">SPOT / ADS [V]</button>
+        <select id="sel-distance" onchange="changeRangeSetup()">
+          <option value="300">300 Yards</option>
+          <option value="400">400 Yards</option>
+          <option value="500" selected>500 Yards</option>
+          <option value="650">650 Yards</option>
+          <option value="800">800 Yards</option>
+          <option value="900">900 Yards</option>
+          <option value="1000">1,000 Yards</option>
+          <option value="1200">1,200 Yards</option>
+          <option value="1500">1,500 Yards</option>
+          <option value="1760">1 Mile (1,760 yd)</option>
+          <option value="2000">2,000 Yards</option>
+        </select>
         <button onclick="rerollWind()">New Wind</button>
       </div>
 
@@ -496,7 +505,7 @@
 
       <!-- Utility Tools -->
       <div class="toolbar">
-        <button class="btn-tool btn-lrf" onclick="triggerLRF()">LRF [R]</button>
+        <button class="btn-tool btn-ads-btn" onclick="toggleADS()">VIEW [V]</button>
         <button class="btn-tool" onclick="toggleWin('win-solver')">SOLVER</button>
         <button class="btn-tool locked" id="btn-kestrel" onclick="openKestrel()">KESTREL</button>
         <button class="btn-tool" onclick="openArmory()">ARMORY</button>
@@ -619,7 +628,7 @@
 
     const WIND_GEAR = [
       { id: 'wind_1', name: 'No Wind Gear (Naked Eye)', cost: 0, desc: 'Read bullet splash dust & mirage only.' },
-      { id: 'wind_2', name: 'Downrange 3D Range Wind Flags', cost: 400, desc: 'Places animated 3D wind flags next to target berms.' },
+      { id: 'wind_2', name: 'Downrange 3D Range Wind Flags', cost: 400, desc: 'Places an animated 3D wind flag beside the target berm.' },
       { id: 'wind_3', name: 'Kestrel 5700 Handheld Meter', cost: 1100, desc: 'Unlocks live collapsible Kestrel weather station HUD.' }
     ];
 
@@ -662,7 +671,10 @@
       cash: DEFAULT_SAVE.cash,
       unlocked: [...DEFAULT_SAVE.unlocked],
       eq: { ...DEFAULT_SAVE.eq },
-      lasedRangeYd: 550,
+
+      targetType: 'ipsc_full', // ipsc_full, ipsc_23, gong_15moa, gong_10moa
+      distanceYd: 500,
+
       azimuthDeg: 90,
       latitudeDeg: 35.8,
       tempF: 64,
@@ -745,11 +757,11 @@
     }
 
     // =========================================================================
-    // 4. THREE.JS 3D SCENE, VALLEY TERRAIN, RIFLE MODEL & 3D TARGETS
+    // 4. THREE.JS 3D SCENE, VALLEY TERRAIN, RIFLE MODEL & DYNAMIC TARGET STAND
     // =========================================================================
     const YD_TO_M = 0.9144;
     const IN_TO_M = 0.0254;
-    const SCOPE_BASE_FOV_DEG = 19.5; // Authentic riflescope 1x apparent FOV
+    const SCOPE_BASE_FOV_DEG = 19.5;
 
     const threeCanvas = document.getElementById('threeCanvas');
     const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, antialias: true });
@@ -757,7 +769,7 @@
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x88b4dc);
-    scene.fog = new THREE.FogExp2(0x9ec0de, 0.00034);
+    scene.fog = new THREE.FogExp2(0x9ec0de, 0.00032);
 
     const mainCamera = new THREE.PerspectiveCamera(42, 16 / 10, 0.1, 3500);
     const scopeCamera = new THREE.PerspectiveCamera(2.0, 1, 0.5, 3500);
@@ -772,7 +784,7 @@
     function getTerrainHeight(x, z) {
       const distM = Math.max(0, -z);
       const valleyWalls = Math.pow(Math.abs(x) / 140, 2.1) * 28;
-      const rollingHills = Math.sin(x * 0.015) * Math.cos(z * 0.012) * 3.5;
+      const rollingHills = Math.sin(x * 0.015) * Math.cos(z * 0.012) * 3.0;
       const mountainBackdrop = distM > 1900 ? Math.pow((distM - 1900) / 300, 1.7) * 95 : 0;
       const firingBenchFlat = distM < 30 ? 0 : 1;
       return (valleyWalls + rollingHills + mountainBackdrop) * firingBenchFlat - 1.5;
@@ -874,89 +886,139 @@
     }
 
     // =========================================================================
-    // 6. 3D STEEL TARGETS, BERMS, WIND FLAGS & HIGH-VISIBILITY SPLASH SYSTEM
+    // 6. DYNAMIC 3D STEEL TARGET ASSEMBLY (PROPER FACING GONG & IPSC SILHOUETTE)
     // =========================================================================
-    const TARGET_DEFS = [
-      { distYd: 350, xOffsetM: -14, type: 'ipsc_full', mult: 1.0, label: '350 yd Full IPSC' },
-      { distYd: 550, xOffsetM: 0,   type: 'ipsc_full', mult: 1.0, label: '550 yd Full IPSC' },
-      { distYd: 780, xOffsetM: 22,  type: 'ipsc_23',   mult: 1.6, label: '780 yd 2/3 IPSC' },
-      { distYd: 1050, xOffsetM: -28, type: 'gong_15moa', mult: 3.0, label: '1,050 yd 1.5 MOA Gong' },
-      { distYd: 1450, xOffsetM: 34,  type: 'ipsc_23',   mult: 1.6, label: '1,450 yd 2/3 IPSC' },
-      { distYd: 1760, xOffsetM: -18, type: 'gong_15moa', mult: 3.0, label: '1 Mile 1.5 MOA Gong' },
-      { distYd: 2000, xOffsetM: 16,  type: 'gong_10moa', mult: 5.0, label: '2,000 yd 1.0 MOA Gong' }
-    ];
-
-    const targetObjects = [];
-    const windFlags = [];
-    const steelMat = new THREE.MeshStandardMaterial({ color: 0xf1f5f9, roughness: 0.45, metalness: 0.25 });
+    const steelFaceMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.38, metalness: 0.25 });
+    const steelRimMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.7 });
     const postMat = new THREE.MeshStandardMaterial({ color: 0x2d3748, roughness: 0.8 });
     const bermMat = new THREE.MeshStandardMaterial({ color: 0x6e5539, roughness: 0.95 });
     const flagMat = new THREE.MeshStandardMaterial({ color: 0xe53e3e, side: THREE.DoubleSide, roughness: 0.7 });
 
-    TARGET_DEFS.forEach((def, idx) => {
-      const zPos = -def.distYd * YD_TO_M;
-      const xPos = def.xOffsetM;
-      const groundY = getTerrainHeight(xPos, zPos);
+    const rangeAssembly = new THREE.Group();
+    scene.add(rangeAssembly);
 
-      const group = new THREE.Group();
-      group.position.set(xPos, groundY, zPos);
+    // Backstop Berm
+    const bermMesh = new THREE.Mesh(new THREE.ConeGeometry(8.5, 3.8, 14), bermMat);
+    bermMesh.position.set(0, 1.5, -3.8);
+    bermMesh.scale.set(1.7, 1, 0.8);
+    rangeAssembly.add(bermMesh);
 
-      const berm = new THREE.Mesh(new THREE.ConeGeometry(7.5, 3.6, 12), bermMat);
-      berm.position.set(0, 1.5, -3.5);
-      berm.scale.set(1.6, 1, 0.8);
-      group.add(berm);
+    // T-Post & Crossbar Stand
+    const frameH = 1.75;
+    const leftLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, frameH, 8), postMat);
+    leftLeg.position.set(-0.55, frameH / 2, 0);
+    const rightLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, frameH, 8), postMat);
+    rightLeg.position.set(0.55, frameH / 2, 0);
+    const topBar = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 1.2, 8), postMat);
+    topBar.rotation.z = Math.PI / 2;
+    topBar.position.set(0, frameH, 0);
+    rangeAssembly.add(leftLeg, rightLeg, topBar);
 
-      const frameH = 1.65;
-      const leftLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, frameH, 8), postMat);
-      leftLeg.position.set(-0.45, frameH / 2, 0);
-      const rightLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, frameH, 8), postMat);
-      rightLeg.position.set(0.45, frameH / 2, 0);
-      const topBar = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.0, 8), postMat);
-      topBar.rotation.z = Math.PI / 2;
-      topBar.position.set(0, frameH, 0);
-      group.add(leftLeg, rightLeg, topBar);
+    // Container for the active target plate (rebuilt cleanly whenever target type/distance changes)
+    const plateHolder = new THREE.Group();
+    plateHolder.position.set(0, 1.05, 0);
+    rangeAssembly.add(plateHolder);
 
-      let plateMesh;
-      let hitCheck = {};
+    // Wind Flag beside target
+    const flagPole = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 1.9, 6), postMat);
+    flagPole.position.set(1.45, 0.95, 0);
+    const flagPivot = new THREE.Group();
+    flagPivot.position.set(1.45, 1.72, 0);
+    const flagCloth = new THREE.Mesh(new THREE.PlaneGeometry(0.95, 0.38), flagMat);
+    flagCloth.position.set(0.475, 0, 0);
+    flagPivot.add(flagCloth);
+    rangeAssembly.add(flagPole, flagPivot);
+
+    // Track active target collision & world center
+    let activeTargetSpec = {
+      worldCenter: new THREE.Vector3(0, 1.05, -500 * YD_TO_M),
+      shape: 'rect',
+      halfW: 9 * IN_TO_M,
+      halfH: 15 * IN_TO_M,
+      radius: 0.2
+    };
+
+    const activeDecals = [];
+
+    function clearImpactDecals() {
+      while (activeDecals.length > 0) {
+        scene.remove(activeDecals.pop());
+      }
+    }
+
+    function rebuildRangeTarget() {
+      // Clear previous plate meshes
+      while (plateHolder.children.length > 0) {
+        plateHolder.remove(plateHolder.children[0]);
+      }
+      clearImpactDecals();
+
+      const zPos = -state.distanceYd * YD_TO_M;
+      const groundY = getTerrainHeight(0, zPos);
+      rangeAssembly.position.set(0, groundY, zPos);
+
       const centerHeightY = 1.05;
+      activeTargetSpec.worldCenter.set(0, groundY + centerHeightY, zPos);
 
-      if (def.type === 'ipsc_full' || def.type === 'ipsc_23') {
-        const s = def.type === 'ipsc_23' ? (2 / 3) : 1.0;
+      // Hanging steel chains from crossbar (y = 1.75 relative to ground, or +0.70 relative to plateHolder)
+      const chainMat = new THREE.MeshStandardMaterial({ color: 0x1a202c });
+      const leftChain = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.65, 6), chainMat);
+      leftChain.position.set(-0.18, 0.38, -0.01);
+      const rightChain = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.65, 6), chainMat);
+      rightChain.position.set(0.18, 0.38, -0.01);
+      plateHolder.add(leftChain, rightChain);
+
+      if (state.targetType === 'ipsc_full' || state.targetType === 'ipsc_23') {
+        const s = state.targetType === 'ipsc_23' ? (2 / 3) : 1.0;
         const wM = 18 * s * IN_TO_M;
         const hM = 30 * s * IN_TO_M;
-        plateMesh = new THREE.Mesh(new THREE.BoxGeometry(wM, hM, 0.025), steelMat);
-        plateMesh.position.set(0, centerHeightY, 0);
-        hitCheck = { shape: 'rect', halfW: wM / 2, halfH: hM / 2 };
+
+        // Torso (85% of total height) + Dark backing frame so silhouette is crisp against the berm
+        const torsoH = hM * 0.84;
+        const torsoY = -hM * 0.08;
+        const torsoBack = new THREE.Mesh(new THREE.BoxGeometry(wM + 0.025, torsoH + 0.025, 0.02), steelRimMat);
+        torsoBack.position.set(0, torsoY, -0.005);
+        const torsoFace = new THREE.Mesh(new THREE.BoxGeometry(wM, torsoH, 0.022), steelFaceMat);
+        torsoFace.position.set(0, torsoY, 0);
+
+        // IPSC Upper Headbox (50% width, 16% height)
+        const headW = wM * 0.50;
+        const headH = hM * 0.16;
+        const headY = torsoY + (torsoH / 2) + (headH / 2);
+        const headBack = new THREE.Mesh(new THREE.BoxGeometry(headW + 0.025, headH + 0.025, 0.02), steelRimMat);
+        headBack.position.set(0, headY, -0.005);
+        const headFace = new THREE.Mesh(new THREE.BoxGeometry(headW, headH, 0.022), steelFaceMat);
+        headFace.position.set(0, headY, 0);
+
+        plateHolder.add(torsoBack, torsoFace, headBack, headFace);
+
+        activeTargetSpec.shape = 'rect';
+        activeTargetSpec.halfW = wM / 2;
+        activeTargetSpec.halfH = hM / 2;
       } else {
-        const moa = def.type === 'gong_10moa' ? 1.0 : 1.5;
-        const diaM = (moa * 1.047 * (def.distYd / 100)) * IN_TO_M;
+        // Round Steel Gong (1.5 MOA or 1.0 MOA)
+        const moa = state.targetType === 'gong_10moa' ? 1.0 : 1.5;
+        const diaM = (moa * 1.047 * (state.distanceYd / 100)) * IN_TO_M;
         const radM = diaM / 2;
-        plateMesh = new THREE.Mesh(new THREE.CylinderGeometry(radM, radM, 0.025, 24), steelMat);
-        plateMesh.rotation.x = Math.PI / 2;
-        plateMesh.position.set(0, centerHeightY, 0);
-        hitCheck = { shape: 'circle', radius: radM };
+
+        // CircleGeometry faces directly along +Z (toward the shooter's scope)
+        const rimDisc = new THREE.Mesh(new THREE.CircleGeometry(radM + 0.018, 32), steelRimMat);
+        rimDisc.position.set(0, 0, -0.004);
+        const faceDisc = new THREE.Mesh(new THREE.CircleGeometry(radM, 32), steelFaceMat);
+        faceDisc.position.set(0, 0, 0.004);
+
+        plateHolder.add(rimDisc, faceDisc);
+
+        activeTargetSpec.shape = 'circle';
+        activeTargetSpec.radius = radM;
       }
-      group.add(plateMesh);
 
-      const flagPole = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 1.8, 6), postMat);
-      flagPole.position.set(1.3, 0.9, 0);
-      const flagCloth = new THREE.Mesh(new THREE.PlaneGeometry(0.85, 0.35), flagMat);
-      const flagPivot = new THREE.Group();
-      flagPivot.position.set(1.3, 1.62, 0);
-      flagCloth.position.set(0.425, 0, 0);
-      flagPivot.add(flagCloth);
-      group.add(flagPole, flagPivot);
-      windFlags.push({ pole: flagPole, pivot: flagPivot });
-
-      scene.add(group);
-      targetObjects.push({
-        idx,
-        def,
-        worldCenter: new THREE.Vector3(xPos, groundY + centerHeightY, zPos),
-        plateMesh,
-        hitCheck
-      });
-    });
+      // Slew rifle smoothly onto the newly placed target
+      const dy = activeTargetSpec.worldCenter.y;
+      const dz = activeTargetSpec.worldCenter.z;
+      state.yawRad = 0;
+      state.pitchRad = Math.atan2(dy, -dz);
+    }
 
     const activeTraces = [];
     const activeSplashes = [];
@@ -973,16 +1035,13 @@
       activeTraces.push({ line, mat, life: 1.0 });
     }
 
-    // High-visibility multi-layer dirt splash & ejecta plume so misses stand out clearly at long range
     function spawn3DDirtSplash(posWorld) {
       const distM = Math.max(200, Math.abs(posWorld.z));
-      // Scale splash size angularly (~1.2 MRAD) so it is unmistakable through the optic at 500–2000 yd
       const baseRadius = Math.max(0.55, distM * 0.0011);
 
       const splashGroup = new THREE.Group();
       splashGroup.position.copy(posWorld);
 
-      // 1. Bright sunlit sand/dust core cloud
       const coreMat = new THREE.MeshBasicMaterial({
         color: 0xf3e5ab,
         transparent: true,
@@ -992,7 +1051,6 @@
       const coreMesh = new THREE.Mesh(new THREE.SphereGeometry(baseRadius, 12, 12), coreMat);
       splashGroup.add(coreMesh);
 
-      // 2. Vertical dirt fountain plume
       const plumeMat = new THREE.MeshBasicMaterial({
         color: 0xd9c29c,
         transparent: true,
@@ -1003,7 +1061,6 @@
       plumeMesh.position.y = baseRadius * 1.1;
       splashGroup.add(plumeMesh);
 
-      // 3. Flying clod/debris particles
       const particles = [];
       const clodMat = new THREE.MeshBasicMaterial({ color: 0x4a3520 });
       for (let p = 0; p < 10; p++) {
@@ -1025,12 +1082,10 @@
         coreMat,
         plumeMat,
         particles,
-        life: 1.0,
-        baseRadius
+        life: 1.0
       });
     }
 
-    // Bright spark flash on steel hit
     function spawn3DSteelSpark(posWorld) {
       const distM = Math.max(200, Math.abs(posWorld.z));
       const sparkR = Math.max(0.22, distM * 0.00045);
@@ -1056,13 +1111,14 @@
 
     function spawn3DImpactDecal(posWorld, isHit) {
       const distM = Math.max(200, Math.abs(posWorld.z));
-      const r = isHit ? 0.032 : Math.max(0.18, distM * 0.00035);
+      const r = isHit ? 0.028 : Math.max(0.18, distM * 0.00035);
       const geo = new THREE.CircleGeometry(r, 12);
       const mat = new THREE.MeshBasicMaterial({ color: isHit ? 0x1a202c : 0x2b1d10 });
       const decal = new THREE.Mesh(geo, mat);
       decal.position.copy(posWorld);
-      decal.position.z += 0.02;
+      decal.position.z += 0.025;
       scene.add(decal);
+      activeDecals.push(decal);
     }
 
     // =========================================================================
@@ -1143,7 +1199,7 @@
 
       const tracePoints = [];
       let transonicTime = 0;
-      let hitTarget = null;
+      let isHit = false;
       let hitPointWorld = null;
       let finalMach = 2.0;
 
@@ -1157,6 +1213,8 @@
       }
 
       let stepCount = 0;
+      const targetPlaneZ = activeTargetSpec.worldCenter.z;
+
       while (x <= maxDistM) {
         const [k1x, k1y, k1z] = derivs(vx, vy, vz);
         const [k2x, k2y, k2z] = derivs(vx + 0.5 * dt * k1x, vy + 0.5 * dt * k1y, vz + 0.5 * dt * k1z);
@@ -1186,28 +1244,26 @@
         }
         stepCount++;
 
-        for (const tObj of targetObjects) {
-          const dz = Math.abs(worldPt.z - tObj.worldCenter.z);
-          if (dz <= 0.45) {
-            const dx = worldPt.x - tObj.worldCenter.x;
-            const dy = worldPt.y - tObj.worldCenter.y;
-            if (tObj.hitCheck.shape === 'rect') {
-              if (Math.abs(dx) <= tObj.hitCheck.halfW && Math.abs(dy) <= tObj.hitCheck.halfH) {
-                hitTarget = tObj;
-                hitPointWorld = worldPt.clone();
-                break;
-              }
-            } else {
-              if (Math.sqrt(dx * dx + dy * dy) <= tObj.hitCheck.radius) {
-                hitTarget = tObj;
-                hitPointWorld = worldPt.clone();
-                break;
-              }
-            }
+        // Check crossing of target plane Z
+        if (worldPt.z <= targetPlaneZ) {
+          const dx = worldPt.x - activeTargetSpec.worldCenter.x;
+          const dy = worldPt.y - activeTargetSpec.worldCenter.y;
+
+          let plateHit = false;
+          if (activeTargetSpec.shape === 'rect') {
+            plateHit = Math.abs(dx) <= activeTargetSpec.halfW && Math.abs(dy) <= activeTargetSpec.halfH;
+          } else {
+            plateHit = Math.sqrt(dx * dx + dy * dy) <= activeTargetSpec.radius;
+          }
+
+          if (plateHit) {
+            isHit = true;
+            hitPointWorld = new THREE.Vector3(worldPt.x, worldPt.y, targetPlaneZ);
+            break;
           }
         }
-        if (hitTarget) break;
 
+        // Check terrain / berm ground collision
         const groundY = getTerrainHeight(worldPt.x, worldPt.z);
         if (worldPt.y <= groundY && x > 15) {
           hitPointWorld = worldPt.clone();
@@ -1221,7 +1277,7 @@
         finalMach,
         transonicTime,
         sg,
-        hitTarget,
+        isHit,
         hitPointWorld,
         tracePoints,
         endBallisticY: y + omega * v0 * (t ** 2) * Math.cos(latRad) * Math.sin(azRad),
@@ -1231,35 +1287,11 @@
     }
 
     // =========================================================================
-    // 8. LASER RANGEFINDER (LRF) & POP-UP SOLVER
+    // 8. POP-UP SOLVER & KESTREL HELPERS
     // =========================================================================
-    const raycaster = new THREE.Raycaster();
-
-    function triggerLRF() {
-      raycaster.setFromCamera(new THREE.Vector2(0, 0), scopeCamera);
-      const targetMeshes = targetObjects.map(t => t.plateMesh);
-      const hitTargets = raycaster.intersectObjects(targetMeshes);
-
-      if (hitTargets.length > 0) {
-        const distM = hitTargets[0].distance;
-        state.lasedRangeYd = Math.round(distM / YD_TO_M);
-        document.getElementById('hud-lrf').innerText = `${state.lasedRangeYd} YD (STEEL)`;
-        setFeedback(`LRF LOCK: ${state.lasedRangeYd} YARDS`, "#63b3ed");
-        return;
-      }
-
-      const hitTerrain = raycaster.intersectObject(terrainMesh);
-      if (hitTerrain.length > 0) {
-        const distM = hitTerrain[0].distance;
-        state.lasedRangeYd = Math.round(distM / YD_TO_M);
-        document.getElementById('hud-lrf').innerText = `${state.lasedRangeYd} YD (BERM)`;
-        setFeedback(`LRF TERRAIN: ${state.lasedRangeYd} YARDS`, "#e2e8f0");
-      }
-    }
-
     function runPopSolver() {
       const { b, a } = getEquipped();
-      const r = parseFloat(document.getElementById('sol-range').value) || 550;
+      const r = parseFloat(document.getElementById('sol-range').value) || 500;
       const ws = parseFloat(document.getElementById('sol-wind').value) || 0;
       const wc = parseFloat(document.getElementById('sol-clock').value) || 3;
 
@@ -1298,7 +1330,7 @@
       if (!isOpen) {
         el.classList.add('open');
         if (id === 'win-solver') {
-          document.getElementById('sol-range').value = state.lasedRangeYd;
+          document.getElementById('sol-range').value = state.distanceYd;
           runPopSolver();
         }
       }
@@ -1360,7 +1392,7 @@
         windClock: state.curWindClock,
         latDeg: state.latitudeDeg,
         azDeg: state.azimuthDeg,
-        maxDistM: 2150,
+        maxDistM: state.distanceYd * YD_TO_M + 35,
         recordTrace: true
       });
 
@@ -1372,25 +1404,16 @@
         sim.hitPointWorld.x += gaussianRandom(0, jitterM);
         sim.hitPointWorld.y += gaussianRandom(0, jitterM * 1.15);
 
-        sim.hitTarget = null;
-        for (const tObj of targetObjects) {
-          if (Math.abs(sim.hitPointWorld.z - tObj.worldCenter.z) <= 1.2) {
-            const dx = sim.hitPointWorld.x - tObj.worldCenter.x;
-            const dy = sim.hitPointWorld.y - tObj.worldCenter.y;
-            if (tObj.hitCheck.shape === 'rect') {
-              if (Math.abs(dx) <= tObj.hitCheck.halfW && Math.abs(dy) <= tObj.hitCheck.halfH) {
-                sim.hitTarget = tObj;
-                sim.hitPointWorld.z = tObj.worldCenter.z;
-                break;
-              }
-            } else {
-              if (Math.sqrt(dx * dx + dy * dy) <= tObj.hitCheck.radius) {
-                sim.hitTarget = tObj;
-                sim.hitPointWorld.z = tObj.worldCenter.z;
-                break;
-              }
-            }
+        // Re-evaluate hit against active target plate after transonic perturbation
+        if (Math.abs(sim.hitPointWorld.z - activeTargetSpec.worldCenter.z) <= 1.2) {
+          const dx = sim.hitPointWorld.x - activeTargetSpec.worldCenter.x;
+          const dy = sim.hitPointWorld.y - activeTargetSpec.worldCenter.y;
+          if (activeTargetSpec.shape === 'rect') {
+            sim.isHit = Math.abs(dx) <= activeTargetSpec.halfW && Math.abs(dy) <= activeTargetSpec.halfH;
+          } else {
+            sim.isHit = Math.sqrt(dx * dx + dy * dy) <= activeTargetSpec.radius;
           }
+          if (sim.isHit) sim.hitPointWorld.z = activeTargetSpec.worldCenter.z;
         }
       }
 
@@ -1407,20 +1430,30 @@
 
         const machNote = sim.finalMach < 1.15 ? ` [Mach ${sim.finalMach.toFixed(2)} Transonic]` : '';
 
-        if (sim.hitTarget) {
+        if (sim.isHit) {
           spawn3DSteelSpark(sim.hitPointWorld);
           spawn3DImpactDecal(sim.hitPointWorld, true);
-          const payout = parseFloat(((sim.hitTarget.def.distYd * 0.04) * sim.hitTarget.def.mult).toFixed(2));
+
+          const multMap = {
+            'ipsc_full': 1.0,
+            'ipsc_23': 1.6,
+            'gong_15moa': 3.0,
+            'gong_10moa': 5.0
+          };
+          const mult = multMap[state.targetType] || 1.0;
+          const payout = parseFloat(((state.distanceYd * 0.04) * mult).toFixed(2));
           state.cash += payout;
           saveProgress();
           updateTopUI();
-          setFeedback(`STEEL IMPACT (${sim.hitTarget.def.distYd} YD)! +$${payout.toFixed(2)}${machNote}`, "#38a169");
+          setFeedback(`STEEL IMPACT (${state.distanceYd} YD)! +$${payout.toFixed(2)}${machNote}`, "#38a169");
         } else {
           if (sim.hitPointWorld) {
             spawn3DDirtSplash(sim.hitPointWorld);
             spawn3DImpactDecal(sim.hitPointWorld, false);
           }
-          setFeedback(`MISS! Watch dirt plume & vapor trace${machNote}`, "#e53e3e");
+          const dxIn = sim.hitPointWorld ? ((sim.hitPointWorld.x - activeTargetSpec.worldCenter.x) / IN_TO_M).toFixed(1) : '?';
+          const dyIn = sim.hitPointWorld ? ((sim.hitPointWorld.y - activeTargetSpec.worldCenter.y) / IN_TO_M).toFixed(1) : '?';
+          setFeedback(`MISS! Splash: ${dxIn >= 0 ? '+' : ''}${dxIn}" H, ${dyIn >= 0 ? '+' : ''}${dyIn}" V${machNote}`, "#e53e3e");
         }
       }, Math.min(sim.tof * 850, 2400));
     }
@@ -1459,18 +1492,15 @@
       }
 
       const showFlags = state.eq.wind === 'wind_2' || state.eq.wind === 'wind_3';
-      const windBlowAngle = ((state.curWindClock * 30 + 180) * Math.PI) / 180;
-      windFlags.forEach((wf, idx) => {
-        wf.pole.visible = showFlags;
-        wf.pivot.visible = showFlags;
-        if (showFlags) {
-          wf.pivot.rotation.y = windBlowAngle + Math.sin(tSec * 7 + idx) * 0.12;
-          const droop = Math.max(0.05, 0.7 - (state.curWindMph / 20));
-          wf.pivot.rotation.z = -droop;
-        }
-      });
+      flagPole.visible = showFlags;
+      flagPivot.visible = showFlags;
+      if (showFlags) {
+        const windBlowAngle = ((state.curWindClock * 30 + 180) * Math.PI) / 180;
+        flagPivot.rotation.y = windBlowAngle + Math.sin(tSec * 7) * 0.12;
+        const droop = Math.max(0.05, 0.7 - (state.curWindMph / 20));
+        flagPivot.rotation.z = -droop;
+      }
 
-      // Fade 3D vapor traces
       for (let i = activeTraces.length - 1; i >= 0; i--) {
         const tr = activeTraces[i];
         tr.life -= 0.011;
@@ -1481,7 +1511,6 @@
         }
       }
 
-      // Update high-visibility dirt splash plumes & steel sparks
       const driftX = -Math.sin((state.curWindClock * 30) * Math.PI / 180) * (state.curWindMph * 0.022);
       for (let i = activeSplashes.length - 1; i >= 0; i--) {
         const sp = activeSplashes[i];
@@ -1496,14 +1525,13 @@
           continue;
         }
 
-        sp.life -= 0.0055; // Lingers ~3 seconds so you can read wind drift on the splash
+        sp.life -= 0.0055;
         sp.group.position.x += driftX;
-        sp.group.children[0].scale.addScalar(0.025); // Core cloud expands
+        sp.group.children[0].scale.addScalar(0.025);
         sp.group.children[0].position.y += 0.018;
-        sp.group.children[1].scale.y += 0.045;    // Vertical dirt column shoots upward
+        sp.group.children[1].scale.y += 0.045;
         sp.group.children[1].position.y += 0.032;
 
-        // Animate flying dirt clods
         sp.particles.forEach(pt => {
           pt.mesh.position.x += pt.vx * 0.025;
           pt.mesh.position.y += pt.vy * 0.025;
@@ -1623,14 +1651,12 @@
       rCtx.arc(cx, cy, scopeRadius, 0, Math.PI * 2);
       rCtx.clip();
 
-      // Optical edge vignette
       const vig = rCtx.createRadialGradient(cx, cy, scopeRadius * 0.74, cx, cy, scopeRadius);
       vig.addColorStop(0, 'rgba(0,0,0,0)');
       vig.addColorStop(1, 'rgba(0,0,0,0.62)');
       rCtx.fillStyle = vig;
       rCtx.fillRect(cx - scopeRadius, cy - scopeRadius, scopeRadius * 2, scopeRadius * 2);
 
-      // SFP calibrated at 10x; FFP scales dynamically with zoom
       const baseFov10x = 2 * Math.atan(Math.tan((SCOPE_BASE_FOV_DEG * Math.PI / 180) / 2) / 10.0);
       const pxPer10xMrad = (scopeViewHeightPx / 2) / Math.tan(baseFov10x / 2) * 0.001;
       const mradPx = o.ffp ? pxPerTrueMrad : pxPer10xMrad;
@@ -1642,14 +1668,12 @@
       rCtx.textBaseline = 'middle';
 
       if (o.reticle === 'mildot') {
-        // Authentic 3-10x SFP Mil-Dot with heavy outer duplex posts at +/- 5 MRAD
         rCtx.lineWidth = 1.1;
         rCtx.beginPath();
         rCtx.moveTo(cx, cy - scopeRadius); rCtx.lineTo(cx, cy + scopeRadius);
         rCtx.moveTo(cx - scopeRadius, cy); rCtx.lineTo(cx + scopeRadius, cy);
         rCtx.stroke();
 
-        // Heavy outer duplex bars beyond 5 MRAD
         const postStart = 5 * mradPx;
         rCtx.lineWidth = Math.max(3.5, mradPx * 0.12);
         rCtx.beginPath();
@@ -1658,7 +1682,6 @@
         rCtx.moveTo(cx, cy + postStart); rCtx.lineTo(cx, cy + scopeRadius);
         rCtx.stroke();
 
-        // True 0.20 MRAD diameter oval mil-dots at 1, 2, 3, 4 MRAD
         const dotR = Math.max(1.8, mradPx * 0.10);
         for (let m = -4; m <= 4; m++) {
           if (m === 0) continue;
@@ -1671,7 +1694,6 @@
           rCtx.fill();
         }
       } else if (o.reticle === 'simple_tree') {
-        // 5-15x FFP Simple Christmas Tree (0.5 MRAD hashes + numbered stadia)
         rCtx.lineWidth = 1.1;
         rCtx.beginPath();
         rCtx.moveTo(cx, cy - scopeRadius); rCtx.lineTo(cx, cy + scopeRadius);
@@ -1691,13 +1713,11 @@
           rCtx.moveTo(cx - halfTick, cy + p); rCtx.lineTo(cx + halfTick, cy + p);
           rCtx.stroke();
 
-          // Stadia numbers every 2 MRAD
           if (isWhole && Math.abs(mr) % 2 === 0 && Math.abs(mr) <= 8) {
             if (mr > 0) rCtx.fillText(`${mr}`, cx - mradPx * 0.42, cy + p);
             rCtx.fillText(`${Math.abs(mr)}`, cx + p, cy - mradPx * 0.36);
           }
 
-          // Clean inverted pyramid wind dots below center
           if (mr >= 1 && isWhole && mr <= 8) {
             const maxW = Math.min(Math.ceil(mr * 0.6), 4);
             for (let w = -maxW; w <= maxW; w++) {
@@ -1709,10 +1729,7 @@
           }
         }
       } else {
-        // 5-25x Full Christmas Tree & 6-36x ELR Tree (0.2 MRAD sub-tensions + floating center dot)
         const maxM = o.reticle === 'elr_tree' ? 16 : 12;
-
-        // Open center gap with crisp 0.05 MRAD floating dot
         const centerGap = mradPx * 0.25;
         rCtx.lineWidth = 1.0;
         rCtx.beginPath();
@@ -1722,7 +1739,6 @@
         rCtx.moveTo(cx + centerGap, cy); rCtx.lineTo(cx + scopeRadius, cy);
         rCtx.stroke();
 
-        // Floating center dot
         rCtx.beginPath();
         rCtx.arc(cx, cy, Math.max(1.4, mradPx * 0.035), 0, Math.PI * 2);
         rCtx.fill();
@@ -1741,13 +1757,11 @@
           rCtx.moveTo(cx - halfTick, cy + p); rCtx.lineTo(cx + halfTick, cy + p);
           rCtx.stroke();
 
-          // Numbered elevation & windage stadia every 2 MRAD
           if (isWhole && Math.abs(mr) % 2 === 0) {
             if (mr > 0) rCtx.fillText(`${mr}`, cx - mradPx * 0.45, cy + p);
             if (Math.abs(mr) <= 10) rCtx.fillText(`${Math.abs(mr)}`, cx + p, cy - mradPx * 0.38);
           }
 
-          // Full cascading Christmas tree wind holdover grid (0.5 MRAD spacing)
           if (mr >= 1 && isWhole) {
             const maxW = Math.min(Math.floor(mr * 0.65) + 1, 8);
             for (let w = -maxW; w <= maxW; w += 0.5) {
@@ -1769,7 +1783,6 @@
 
       rCtx.restore();
 
-      // Metallic Scope Bezel Ring
       rCtx.strokeStyle = '#252c35';
       rCtx.lineWidth = isPiP ? 5 : 6;
       rCtx.beginPath();
@@ -1778,21 +1791,14 @@
     }
 
     // =========================================================================
-    // 11. CONTROLS, TARGET SNAP & ARMORY UI
+    // 11. CONTROLS, RANGE SETUP & ARMORY UI
     // =========================================================================
-    function snapToTarget(idxStr) {
-      const tObj = targetObjects[parseInt(idxStr, 10)];
-      if (!tObj) return;
-      const dx = tObj.worldCenter.x;
-      const dy = tObj.worldCenter.y;
-      const dz = tObj.worldCenter.z;
-      const horizDist = Math.sqrt(dx * dx + dz * dz);
-
-      state.yawRad = Math.atan2(-dx, -dz);
-      state.pitchRad = Math.atan2(dy, horizDist);
-      state.lasedRangeYd = tObj.def.distYd;
-      document.getElementById('hud-lrf').innerText = `${state.lasedRangeYd} YD (STEEL)`;
-      setFeedback(`SLEWED TO: ${tObj.def.label}`, "#e2e8f0");
+    function changeRangeSetup() {
+      state.targetType = document.getElementById('sel-target-type').value;
+      state.distanceYd = parseFloat(document.getElementById('sel-distance').value);
+      document.getElementById('hud-dist').innerText = `${state.distanceYd} YD`;
+      rebuildRangeTarget();
+      setFeedback(`TARGET SET: ${state.distanceYd} YARDS`, "#e2e8f0");
     }
 
     function toggleADS() {
@@ -1883,7 +1889,6 @@
       if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') stepTurret('wind', -0.1);
       if (e.key === 'x' || e.key === 'X') stepZoom(+1);
       if (e.key === 'z' || e.key === 'Z') stepZoom(-1);
-      if (e.key === 'r' || e.key === 'R') triggerLRF();
       if (e.key === 'v' || e.key === 'V') toggleADS();
       if (e.key === 'b' || e.key === 'B') setBreathHold(true);
       if (e.code === 'Space') { e.preventDefault(); fireRound(); }
@@ -1944,7 +1949,7 @@
 
     function buyItem(cat, id, cost) {
       if (state.cash < cost) {
-        alert("Not enough funds! Hit more steel targets across the valley.");
+        alert("Not enough funds! Hit more steel targets on the range.");
         return;
       }
       state.cash -= cost;
@@ -1969,7 +1974,7 @@
     loadProgress();
     updateRifleAppearance();
     updateTopUI();
-    snapToTarget('1');
+    rebuildRangeTarget();
     requestAnimationFrame(animate);
   </script>
 </body>

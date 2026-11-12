@@ -1199,16 +1199,78 @@
     const activeTraces = [];
     const activeSplashes = [];
 
+    // Tightly wound helical double-vortex bullet vapor trace (subtle & semi-transparent)
     function spawn3DTrace(pointsWorld) {
-      const geo = new THREE.BufferGeometry().setFromPoints(pointsWorld);
-      const mat = new THREE.LineBasicMaterial({
+      if (pointsWorld.length < 3) return;
+
+      const helixPts1 = [];
+      const helixPts2 = [];
+      const corePts = [];
+
+      const totalPts = pointsWorld.length;
+      const vortexRadius = 0.018; // ~0.7 inch tight aerodynamic vortex radius
+      const turnsPerMeter = 0.45; // Tightly wound corkscrew pitch
+
+      const upRef = new THREE.Vector3(0, 1, 0);
+
+      for (let i = 0; i < totalPts; i++) {
+        const p = pointsWorld[i];
+        const pPrev = pointsWorld[Math.max(0, i - 1)];
+        const pNext = pointsWorld[Math.min(totalPts - 1, i + 1)];
+
+        const tangent = new THREE.Vector3().subVectors(pNext, pPrev).normalize();
+        const right = new THREE.Vector3().crossVectors(tangent, upRef).normalize();
+        const normal = new THREE.Vector3().crossVectors(right, tangent).normalize();
+
+        const distM = Math.abs(p.z);
+        const theta = distM * turnsPerMeter * Math.PI * 2;
+        // Slight widening of the wake cone far downrange
+        const r = vortexRadius * (1.0 + (distM / 1200) * 0.6);
+
+        const offset1 = new THREE.Vector3()
+          .addScaledVector(right, Math.cos(theta) * r)
+          .addScaledVector(normal, Math.sin(theta) * r);
+
+        const offset2 = new THREE.Vector3()
+          .addScaledVector(right, Math.cos(theta + Math.PI) * r)
+          .addScaledVector(normal, Math.sin(theta + Math.PI) * r);
+
+        helixPts1.push(p.clone().add(offset1));
+        helixPts2.push(p.clone().add(offset2));
+        corePts.push(p.clone());
+      }
+
+      const group = new THREE.Group();
+
+      const mat1 = new THREE.LineBasicMaterial({
+        color: 0xf8fafc,
+        transparent: true,
+        opacity: 0.28
+      });
+      const mat2 = new THREE.LineBasicMaterial({
+        color: 0xdbeafe,
+        transparent: true,
+        opacity: 0.22
+      });
+      const matCore = new THREE.LineBasicMaterial({
         color: 0xffffff,
         transparent: true,
-        opacity: 0.65
+        opacity: 0.14
       });
-      const line = new THREE.Line(geo, mat);
-      scene.add(line);
-      activeTraces.push({ line, mat, life: 1.0 });
+
+      const line1 = new THREE.Line(new THREE.BufferGeometry().setFromPoints(helixPts1), mat1);
+      const line2 = new THREE.Line(new THREE.BufferGeometry().setFromPoints(helixPts2), mat2);
+      const lineCore = new THREE.Line(new THREE.BufferGeometry().setFromPoints(corePts), matCore);
+
+      group.add(line1, line2, lineCore);
+      scene.add(group);
+
+      activeTraces.push({
+        group,
+        mats: [mat1, mat2, matCore],
+        baseOpacities: [0.28, 0.22, 0.14],
+        life: 1.0
+      });
     }
 
     function spawn3DDirtSplash(posWorld, isBermHit = false) {
@@ -1460,7 +1522,8 @@
 
         const worldPt = toWorld(x, y + corV_m, z + spin_m + corH_m);
 
-        if (recordTrace && stepCount % 6 === 0) {
+        // Higher sample density (every 3rd step) so tight helical coils render smoothly
+        if (recordTrace && stepCount % 3 === 0) {
           tracePoints.push(worldPt.clone());
         }
         stepCount++;
@@ -1824,17 +1887,24 @@
         flagPivot.rotation.z = -droop;
       }
 
-      // Vapor Traces & Dirt Plumes (Quarter duration: 0.022 decay rate)
+      // Helical Vortex Vapor Traces (translucent + subtle downwind drift)
       for (let i = activeTraces.length - 1; i >= 0; i--) {
         const tr = activeTraces[i];
-        tr.life -= 0.011;
-        tr.mat.opacity = Math.max(0, tr.life * 0.65);
+        tr.life -= 0.014;
+        tr.group.position.x += windDriftVelX * 0.008;
+        tr.group.position.y += 0.002;
+        for (let m = 0; m < tr.mats.length; m++) {
+          tr.mats[m].opacity = Math.max(0, tr.life * tr.baseOpacities[m]);
+        }
         if (tr.life <= 0) {
-          scene.remove(tr.line);
+          tr.group.children.forEach(c => c.geometry.dispose());
+          tr.mats.forEach(m => m.dispose());
+          scene.remove(tr.group);
           activeTraces.splice(i, 1);
         }
       }
 
+      // Dirt Plumes & Steel Sparks
       for (let i = activeSplashes.length - 1; i >= 0; i--) {
         const sp = activeSplashes[i];
         if (sp.isSpark) {

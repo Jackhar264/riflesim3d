@@ -781,7 +781,6 @@
     sunLight.position.set(180, 320, 120);
     scene.add(sunLight);
 
-    // Procedural Soft Radial Dust Sprite Texture (No hard ball edges)
     function createDustTexture() {
       const c = document.createElement('canvas');
       c.width = 128;
@@ -903,7 +902,7 @@
     }
 
     // =========================================================================
-    // 6. DYNAMIC 3D STEEL TARGET ASSEMBLY
+    // 6. DYNAMIC 3D STEEL TARGET ASSEMBLY & BERM GEOMETRY
     // =========================================================================
     const steelFaceMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.38, metalness: 0.25 });
     const steelRimMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.7 });
@@ -919,8 +918,15 @@
     padMesh.position.set(0, -0.1, 0);
     rangeAssembly.add(padMesh);
 
-    const bermMesh = new THREE.Mesh(new THREE.ConeGeometry(8.5, 4.4, 16), bermMat);
-    bermMesh.position.set(0, 1.8, -9.5);
+    // Backstop Berm Cone Constants (shared with collision detector)
+    const BERM_LOCAL_Z = -9.5;
+    const BERM_BASE_Y = -0.4;
+    const BERM_HEIGHT = 4.6;
+    const BERM_RADIUS_X = 8.5 * 1.6;  // 13.6m half-width
+    const BERM_RADIUS_Z = 8.5 * 0.65; // 5.525m half-depth
+
+    const bermMesh = new THREE.Mesh(new THREE.ConeGeometry(8.5, BERM_HEIGHT, 16), bermMat);
+    bermMesh.position.set(0, BERM_BASE_Y + BERM_HEIGHT / 2, BERM_LOCAL_Z);
     bermMesh.scale.set(1.6, 1.0, 0.65);
     rangeAssembly.add(bermMesh);
 
@@ -949,6 +955,8 @@
 
     let activeTargetSpec = {
       worldCenter: new THREE.Vector3(0, 1.05, -500 * YD_TO_M),
+      groundY: -1.5,
+      standZ: -500 * YD_TO_M,
       shape: 'rect',
       halfW: 9 * IN_TO_M,
       halfH: 15 * IN_TO_M,
@@ -975,6 +983,8 @@
 
       const centerHeightY = 1.05;
       activeTargetSpec.worldCenter.set(0, groundY + centerHeightY, zPos + 0.06);
+      activeTargetSpec.groundY = groundY;
+      activeTargetSpec.standZ = zPos;
 
       const chainMat = new THREE.MeshStandardMaterial({ color: 0x1a202c });
       const leftChain = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.65, 6), chainMat);
@@ -1030,6 +1040,15 @@
       state.pitchRad = Math.atan2(dy, -dz);
     }
 
+    // Compute surface elevation Y of the 3D backstop berm cone at world (wx, wz)
+    function getBermSurfaceY(wx, wz) {
+      const localZ = wz - activeTargetSpec.standZ - BERM_LOCAL_Z;
+      const normDist = Math.sqrt((wx / BERM_RADIUS_X) ** 2 + (localZ / BERM_RADIUS_Z) ** 2);
+      if (normDist >= 1.0) return -9999; // Outside berm footprint
+      const localConeY = BERM_BASE_Y + BERM_HEIGHT * (1.0 - normDist);
+      return activeTargetSpec.groundY + localConeY;
+    }
+
     const activeTraces = [];
     const activeSplashes = [];
 
@@ -1045,42 +1064,45 @@
       activeTraces.push({ line, mat, life: 1.0 });
     }
 
-    // Realistic V-Shaped Soft Sprite Dirt Plume (Replaces hard spheres/cones)
-    function spawn3DDirtSplash(posWorld) {
+    function spawn3DDirtSplash(posWorld, isBermHit = false) {
       const distM = Math.max(200, Math.abs(posWorld.z));
-      const scaleUnit = Math.max(0.42, distM * 0.00085);
+      const scaleUnit = Math.max(0.45, distM * 0.0009);
 
       const splashGroup = new THREE.Group();
       splashGroup.position.copy(posWorld);
+      if (isBermHit) {
+        // Offset slightly forward (+Z) off the berm slope so dust ejects cleanly toward shooter
+        splashGroup.position.z += 0.25;
+      }
 
       const puffs = [];
       const puffCount = 28;
 
       for (let i = 0; i < puffCount; i++) {
-        // Fraction t along vertical column (0 = ground ejecta, 1 = high wispy top of plume)
         const t = i / puffCount;
         const spriteMat = new THREE.SpriteMaterial({
           map: DUST_TEXTURE,
           color: t < 0.35 ? 0xd8c39e : 0xeaddc5,
           transparent: true,
-          opacity: 0.88 - t * 0.25,
+          opacity: 0.90 - t * 0.25,
           depthWrite: false
         });
         const sprite = new THREE.Sprite(spriteMat);
 
-        // V-shaped ejecta fan: tight near base, flaring slightly wider at top
         const spreadAngle = (Math.random() - 0.5) * 0.42;
-        const zSpread = (Math.random() - 0.5) * 0.25;
         const launchSpeedY = scaleUnit * (4.5 + t * 11.5 + Math.random() * 2.5);
         const launchSpeedX = Math.sin(spreadAngle) * launchSpeedY * 0.38;
-        const launchSpeedZ = zSpread * launchSpeedY * 0.3;
+        // If striking vertical berm face, eject dirt slightly forward (+Z) as well as upward
+        const launchSpeedZ = isBermHit
+          ? scaleUnit * (1.5 + Math.random() * 2.5)
+          : (Math.random() - 0.5) * launchSpeedY * 0.25;
 
-        const initSize = scaleUnit * (0.65 + t * 0.85 + Math.random() * 0.4);
+        const initSize = scaleUnit * (0.68 + t * 0.88 + Math.random() * 0.4);
         sprite.scale.set(initSize, initSize, 1);
         sprite.position.set(
           (Math.random() - 0.5) * scaleUnit * 0.25,
           t * scaleUnit * 0.4,
-          (Math.random() - 0.5) * scaleUnit * 0.25
+          (Math.random() - 0.5) * scaleUnit * 0.2
         );
 
         splashGroup.add(sprite);
@@ -1092,11 +1114,10 @@
           vz: launchSpeedZ,
           growRate: scaleUnit * (0.9 + t * 1.1),
           drag: 0.89 - t * 0.03,
-          baseOpacity: 0.85 - t * 0.25
+          baseOpacity: 0.88 - t * 0.25
         });
       }
 
-      // Small dark dirt clods ejected near the base
       const clods = [];
       const clodMat = new THREE.MeshBasicMaterial({ color: 0x3b2a1a });
       for (let c = 0; c < 8; c++) {
@@ -1108,7 +1129,7 @@
           mesh: clod,
           vx: Math.sin(ang) * spd,
           vy: spd * (1.2 + Math.random() * 0.8),
-          vz: (Math.random() - 0.5) * spd * 0.5
+          vz: isBermHit ? spd * (0.4 + Math.random() * 0.6) : (Math.random() - 0.5) * spd * 0.5
         });
       }
 
@@ -1142,14 +1163,21 @@
       });
     }
 
-    function spawn3DImpactDecal(posWorld, isHit) {
+    function spawn3DImpactDecal(posWorld, isHit, isBermHit = false) {
       const distM = Math.max(200, Math.abs(posWorld.z));
-      const r = isHit ? 0.028 : Math.max(0.16, distM * 0.0003);
+      const r = isHit ? 0.028 : Math.max(0.18, distM * 0.00032);
       const geo = new THREE.CircleGeometry(r, 12);
-      const mat = new THREE.MeshBasicMaterial({ color: isHit ? 0x1a202c : 0x2b1d10 });
+      const mat = new THREE.MeshBasicMaterial({ color: isHit ? 0x1a202c : 0x24170c });
       const decal = new THREE.Mesh(geo, mat);
       decal.position.copy(posWorld);
-      decal.position.z += 0.035;
+      if (isBermHit) {
+        // Tilt crater decal slightly to match the sloped front face of the berm
+        decal.rotation.x = -0.55;
+        decal.position.z += 0.14;
+        decal.position.y += 0.06;
+      } else {
+        decal.position.z += 0.035;
+      }
       scene.add(decal);
       activeDecals.push(decal);
     }
@@ -1233,6 +1261,7 @@
       const tracePoints = [];
       let transonicTime = 0;
       let isHit = false;
+      let isBermHit = false;
       let hitPointWorld = null;
       let finalMach = 2.0;
 
@@ -1277,6 +1306,7 @@
         }
         stepCount++;
 
+        // 1. Check steel target plate intersection
         if (worldPt.z <= targetPlaneZ) {
           const dx = worldPt.x - activeTargetSpec.worldCenter.x;
           const dy = worldPt.y - activeTargetSpec.worldCenter.y;
@@ -1295,6 +1325,18 @@
           }
         }
 
+        // 2. Check 3D Backstop Berm Cone intersection (for misses behind target)
+        if (recordTrace) {
+          const bermSurfY = getBermSurfaceY(worldPt.x, worldPt.z);
+          if (worldPt.y <= bermSurfY) {
+            isBermHit = true;
+            hitPointWorld = worldPt.clone();
+            hitPointWorld.y = bermSurfY;
+            break;
+          }
+        }
+
+        // 3. Check general terrain valley floor collision
         const groundY = getTerrainHeight(worldPt.x, worldPt.z);
         if (worldPt.y <= groundY && x > 15) {
           hitPointWorld = worldPt.clone();
@@ -1309,6 +1351,7 @@
         transonicTime,
         sg,
         isHit,
+        isBermHit,
         hitPointWorld,
         tracePoints,
         endBallisticY: y + omega * v0 * (t ** 2) * Math.cos(latRad) * Math.sin(azRad),
@@ -1423,7 +1466,7 @@
         windClock: state.curWindClock,
         latDeg: state.latitudeDeg,
         azDeg: state.azimuthDeg,
-        maxDistM: state.distanceYd * YD_TO_M + 35,
+        maxDistM: state.distanceYd * YD_TO_M + 45,
         recordTrace: true
       });
 
@@ -1462,7 +1505,7 @@
 
         if (sim.isHit) {
           spawn3DSteelSpark(sim.hitPointWorld);
-          spawn3DImpactDecal(sim.hitPointWorld, true);
+          spawn3DImpactDecal(sim.hitPointWorld, true, false);
 
           const multMap = {
             'ipsc_full': 1.0,
@@ -1478,12 +1521,13 @@
           setFeedback(`STEEL IMPACT (${state.distanceYd} YD)! +$${payout.toFixed(2)}${machNote}`, "#38a169");
         } else {
           if (sim.hitPointWorld) {
-            spawn3DDirtSplash(sim.hitPointWorld);
-            spawn3DImpactDecal(sim.hitPointWorld, false);
+            spawn3DDirtSplash(sim.hitPointWorld, sim.isBermHit);
+            spawn3DImpactDecal(sim.hitPointWorld, false, sim.isBermHit);
           }
           const dxIn = sim.hitPointWorld ? ((sim.hitPointWorld.x - activeTargetSpec.worldCenter.x) / IN_TO_M).toFixed(1) : '?';
           const dyIn = sim.hitPointWorld ? ((sim.hitPointWorld.y - activeTargetSpec.worldCenter.y) / IN_TO_M).toFixed(1) : '?';
-          setFeedback(`MISS! Splash: ${dxIn >= 0 ? '+' : ''}${dxIn}" H, ${dyIn >= 0 ? '+' : ''}${dyIn}" V${machNote}`, "#e53e3e");
+          const where = sim.isBermHit ? 'BERM' : 'GROUND';
+          setFeedback(`MISS (${where})! Splash: ${dxIn >= 0 ? '+' : ''}${dxIn}" H, ${dyIn >= 0 ? '+' : ''}${dyIn}" V${machNote}`, "#e53e3e");
         }
       }, Math.min(sim.tof * 850, 2400));
     }
@@ -1541,7 +1585,6 @@
         }
       }
 
-      // Animate soft V-shaped dust plume & downwind drift
       const windDriftVelX = -Math.sin((state.curWindClock * 30) * Math.PI / 180) * (state.curWindMph * 0.08);
       for (let i = activeSplashes.length - 1; i >= 0; i--) {
         const sp = activeSplashes[i];
@@ -1556,14 +1599,13 @@
           continue;
         }
 
-        sp.life -= 0.0055; // Lingers ~3s so shooter can read wind drift on the plume
+        sp.life -= 0.0055;
 
         sp.puffs.forEach(pf => {
           pf.sprite.position.x += (pf.vx + windDriftVelX * (1.0 - sp.life * 0.5)) * 0.016;
           pf.sprite.position.y += pf.vy * 0.016;
           pf.sprite.position.z += pf.vz * 0.016;
 
-          // Rapid upward air drag so plume shoots up sharply then hangs & billows
           pf.vx *= pf.drag;
           pf.vy *= pf.drag;
           pf.vz *= pf.drag;

@@ -701,6 +701,14 @@
       recoilYaw: 0,
       swayX: 0,
       swayY: 0,
+
+      // Procedural Animation States
+      plateSwingVel: 0,
+      plateSwingAngle: 0,
+      muzzleFlashFrames: 0,
+      boltCycleTimer: -1, // -1 = idle, >= 0 = animating cycle
+      brassEjected: false,
+
       inFlight: false
     };
 
@@ -757,7 +765,7 @@
     }
 
     // =========================================================================
-    // 4. THREE.JS 3D SCENE, VALLEY TERRAIN, RIFLE MODEL & DYNAMIC TARGET STAND
+    // 4. THREE.JS 3D SCENE, VALLEY TERRAIN, RIFLE MODEL & ANIMATIONS
     // =========================================================================
     const YD_TO_M = 0.9144;
     const IN_TO_M = 0.0254;
@@ -771,8 +779,7 @@
     scene.background = new THREE.Color(0x88b4dc);
     scene.fog = new THREE.FogExp2(0x9ec0de, 0.00032);
 
-    const mainCamera = new THREE.PerspectiveCamera(42, 16 / 10, 0.5, 2500);
-    // Near plane set to 5.0m to maximize 24-bit depth buffer precision at 1000–2000 yd
+    const mainCamera = new THREE.PerspectiveCamera(42, 16 / 10, 0.08, 2500);
     const scopeCamera = new THREE.PerspectiveCamera(2.0, 1, 5.0, 2500);
 
     const hemiLight = new THREE.HemisphereLight(0xdceeff, 0x4d5d38, 0.85);
@@ -797,6 +804,22 @@
       return new THREE.CanvasTexture(c);
     }
     const DUST_TEXTURE = createDustTexture();
+
+    function createFlashTexture() {
+      const c = document.createElement('canvas');
+      c.width = 128;
+      c.height = 128;
+      const ctx = c.getContext('2d');
+      const grad = ctx.createRadialGradient(64, 64, 2, 64, 64, 62);
+      grad.addColorStop(0.0, 'rgba(255, 255, 240, 1.0)');
+      grad.addColorStop(0.28, 'rgba(255, 195, 75, 0.92)');
+      grad.addColorStop(0.65, 'rgba(235, 95, 20, 0.35)');
+      grad.addColorStop(1.0, 'rgba(235, 95, 20, 0.0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 128, 128);
+      return new THREE.CanvasTexture(c);
+    }
+    const FLASH_TEXTURE = createFlashTexture();
 
     function getTerrainHeight(x, z) {
       const distM = Math.max(0, -z);
@@ -858,7 +881,7 @@
     }
 
     // =========================================================================
-    // 5. 3D RIFLE RIG
+    // 5. 3D RIFLE RIG WITH ANIMATED BOLT HANDLE, MUZZLE FLASH & BRASS EJECTION
     // =========================================================================
     const rifleRig = new THREE.Group();
     rifleRig.position.set(0, 0, 0);
@@ -867,6 +890,7 @@
     const chassisMat = new THREE.MeshStandardMaterial({ color: 0x2b3036, roughness: 0.65, metalness: 0.3 });
     const barrelMat = new THREE.MeshStandardMaterial({ color: 0x1c2026, roughness: 0.35, metalness: 0.8 });
     const scopeMat = new THREE.MeshStandardMaterial({ color: 0x111418, roughness: 0.4, metalness: 0.7 });
+    const boltSteelMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.25, metalness: 0.9 });
 
     const barrelMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.019, 0.78, 16), barrelMat);
     barrelMesh.rotation.x = Math.PI / 2;
@@ -882,6 +906,52 @@
     forendMesh.position.set(0, -0.072, -0.32);
     rifleRig.add(forendMesh);
 
+    // Receiver Action & Animated Bolt Group (visible in 1x + PiP view)
+    const receiverMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.021, 0.16, 16), barrelMat);
+    receiverMesh.rotation.x = Math.PI / 2;
+    receiverMesh.position.set(0, -0.045, -0.05);
+    rifleRig.add(receiverMesh);
+
+    const boltPivot = new THREE.Group();
+    boltPivot.position.set(0, -0.045, -0.02); // Pivots around bore axis
+    const boltBody = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.12, 12), boltSteelMat);
+    boltBody.rotation.x = Math.PI / 2;
+    boltBody.position.set(0, 0, -0.02);
+
+    const boltArm = new THREE.Mesh(new THREE.CylinderGeometry(0.0035, 0.004, 0.042, 8), boltSteelMat);
+    boltArm.rotation.z = Math.PI / 2;
+    boltArm.position.set(0.024, -0.005, 0.03);
+
+    const boltKnob = new THREE.Mesh(new THREE.SphereGeometry(0.009, 10, 10), barrelMat);
+    boltKnob.position.set(0.046, -0.008, 0.03);
+
+    boltPivot.add(boltBody, boltArm, boltKnob);
+    rifleRig.add(boltPivot);
+
+    // Muzzle Flash Sprite Group at Brake Tip
+    const muzzleFlashGroup = new THREE.Group();
+    muzzleFlashGroup.position.set(0, -0.045, -0.92);
+    muzzleFlashGroup.visible = false;
+
+    const flashMat = new THREE.SpriteMaterial({
+      map: FLASH_TEXTURE,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    const centerFlash = new THREE.Sprite(flashMat);
+    centerFlash.scale.set(0.24, 0.24, 1);
+    const leftJet = new THREE.Sprite(flashMat);
+    leftJet.scale.set(0.32, 0.10, 1);
+    leftJet.position.set(-0.08, 0, 0.02);
+    const rightJet = new THREE.Sprite(flashMat);
+    rightJet.scale.set(0.32, 0.10, 1);
+    rightJet.position.set(0.08, 0, 0.02);
+    muzzleFlashGroup.add(centerFlash, leftJet, rightJet);
+    rifleRig.add(muzzleFlashGroup);
+
+    // Scope Tube & Turrets
     const scopeTubeMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.022, 0.36, 20), scopeMat);
     scopeTubeMesh.rotation.x = Math.PI / 2;
     scopeTubeMesh.position.set(0, 0.0, -0.24);
@@ -902,10 +972,73 @@
       else chassisMat.color.setHex(0x23262b);
     }
 
+    // Active Ejected Brass Casings & Muzzle Smoke Wisps
+    const activeBrass = [];
+    const activeMuzzleSmoke = [];
+    const brassMat = new THREE.MeshStandardMaterial({ color: 0xd4af37, roughness: 0.28, metalness: 0.88 });
+
+    function spawnEjectedBrass() {
+      const { b } = getEquipped();
+      const scaleMult = Math.max(0.85, b.dia / 0.264);
+      const caseGeo = new THREE.CylinderGeometry(0.0055 * scaleMult, 0.0062 * scaleMult, 0.052 * scaleMult, 10);
+      const mesh = new THREE.Mesh(caseGeo, brassMat);
+
+      // Ejection port world position
+      const localPort = new THREE.Vector3(0.025, -0.035, -0.04);
+      const worldPort = localPort.applyMatrix4(rifleRig.matrixWorld);
+      mesh.position.copy(worldPort);
+
+      // Eject up and right relative to rifle orientation
+      const rightVec = new THREE.Vector3(1, 0, 0).applyQuaternion(rifleRig.quaternion);
+      const upVec = new THREE.Vector3(0, 1, 0).applyQuaternion(rifleRig.quaternion);
+      const backVec = new THREE.Vector3(0, 0, 1).applyQuaternion(rifleRig.quaternion);
+
+      const vel = new THREE.Vector3()
+        .addScaledVector(rightVec, 1.35 + Math.random() * 0.35)
+        .addScaledVector(upVec, 1.65 + Math.random() * 0.3)
+        .addScaledVector(backVec, 0.35 + Math.random() * 0.2);
+
+      scene.add(mesh);
+      activeBrass.push({
+        mesh,
+        vel,
+        spinX: 16 + Math.random() * 10,
+        spinZ: 12 + Math.random() * 8,
+        life: 1.5
+      });
+    }
+
+    function spawnMuzzleSmoke() {
+      const localMuzzle = new THREE.Vector3(0, -0.045, -0.92);
+      const worldMuzzle = localMuzzle.applyMatrix4(rifleRig.matrixWorld);
+
+      for (let i = 0; i < 4; i++) {
+        const mat = new THREE.SpriteMaterial({
+          map: DUST_TEXTURE,
+          color: 0xcbd5e1,
+          transparent: true,
+          opacity: 0.38,
+          depthWrite: false
+        });
+        const sp = new THREE.Sprite(mat);
+        sp.position.copy(worldMuzzle);
+        sp.position.z -= i * 0.08;
+        const sz = 0.14 + i * 0.05;
+        sp.scale.set(sz, sz, 1);
+        scene.add(sp);
+        activeMuzzleSmoke.push({
+          sp,
+          mat,
+          vy: 0.22 + Math.random() * 0.12,
+          vz: -0.35,
+          life: 1.0
+        });
+      }
+    }
+
     // =========================================================================
-    // 6. DYNAMIC 3D STEEL TARGET ASSEMBLY & BERM GEOMETRY
+    // 6. DYNAMIC 3D STEEL TARGET ASSEMBLY (SWINGING PIVOT + Z-FIGHTING FIX)
     // =========================================================================
-    // PolygonOffset + clean Z separation prevents any black Z-fighting pixelation at 1000–2000 yd
     const steelFaceMat = new THREE.MeshStandardMaterial({
       color: 0xf8fafc,
       roughness: 0.38,
@@ -948,9 +1081,14 @@
     topBar.position.set(0, frameH, 0);
     rangeAssembly.add(leftLeg, rightLeg, topBar);
 
+    // Top-hinged pivot group so steel target swings realistically when struck
+    const platePivot = new THREE.Group();
+    platePivot.position.set(0, frameH, 0.08);
+    rangeAssembly.add(platePivot);
+
     const plateHolder = new THREE.Group();
-    plateHolder.position.set(0, 1.05, 0.08);
-    rangeAssembly.add(plateHolder);
+    plateHolder.position.set(0, -0.70, 0); // Plate center at y = 1.75 - 0.70 = 1.05m
+    platePivot.add(plateHolder);
 
     const flagPole = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.95, 6), postMat);
     flagPole.position.set(1.65, 0.97, 0);
@@ -975,7 +1113,9 @@
 
     function clearImpactDecals() {
       while (activeDecals.length > 0) {
-        scene.remove(activeDecals.pop());
+        const d = activeDecals.pop();
+        if (d.parent) d.parent.remove(d);
+        else scene.remove(d);
       }
     }
 
@@ -984,6 +1124,9 @@
         plateHolder.remove(plateHolder.children[0]);
       }
       clearImpactDecals();
+      state.plateSwingVel = 0;
+      state.plateSwingAngle = 0;
+      platePivot.rotation.x = 0;
 
       const zPos = -state.distanceYd * YD_TO_M;
       const groundY = getTerrainHeight(0, zPos);
@@ -1179,17 +1322,26 @@
         polygonOffsetUnits: -4
       });
       const decal = new THREE.Mesh(geo, mat);
-      decal.position.copy(posWorld);
+
       if (isHit) {
-        decal.position.z += 0.05;
-      } else if (isBermHit) {
-        decal.rotation.x = -0.55;
-        decal.position.z += 0.08;
-        decal.position.y += 0.03;
+        // Attach lead splatter directly to swinging plateHolder so it moves with the steel
+        decal.position.set(
+          posWorld.x - activeTargetSpec.worldCenter.x,
+          posWorld.y - activeTargetSpec.worldCenter.y,
+          0.036
+        );
+        plateHolder.add(decal);
       } else {
-        decal.position.z += 0.04;
+        decal.position.copy(posWorld);
+        if (isBermHit) {
+          decal.rotation.x = -0.55;
+          decal.position.z += 0.08;
+          decal.position.y += 0.03;
+        } else {
+          decal.position.z += 0.04;
+        }
+        scene.add(decal);
       }
-      scene.add(decal);
       activeDecals.push(decal);
     }
 
@@ -1427,7 +1579,7 @@
     }
 
     // =========================================================================
-    // 9. FIRING ROUND IN 3D SPACE
+    // 9. FIRING ROUND IN 3D SPACE (WITH MUZZLE FLASH & BOLT CYCLE TRIGGER)
     // =========================================================================
     function fireRound() {
       if (state.inFlight) return;
@@ -1445,6 +1597,12 @@
       state.inFlight = true;
       document.getElementById('btn-fire').disabled = true;
       setFeedback("SHOT FIRED — TRACKING 3D TRACE...", "#e5a93b");
+
+      // Trigger Muzzle Flash, Smoke Wisp & Bolt Cycle Animation
+      state.muzzleFlashFrames = 3;
+      spawnMuzzleSmoke();
+      state.boltCycleTimer = 0.0;
+      state.brassEjected = false;
 
       const actualMV = gaussianRandom(b.mv + a.mvBonus, a.mvSD);
       const actualBC = gaussianRandom(b.bc, b.bc * a.bcSDPct);
@@ -1514,6 +1672,8 @@
         if (sim.isHit) {
           spawn3DSteelSpark(sim.hitPointWorld);
           spawn3DImpactDecal(sim.hitPointWorld, true, false);
+          // Subtle physical swing impulse on the steel target plate
+          state.plateSwingVel -= 0.048 * Math.min(1.5, b.wt / 140);
 
           const multMap = {
             'ipsc_full': 1.0,
@@ -1541,7 +1701,7 @@
     }
 
     // =========================================================================
-    // 10. DUAL-CAMERA RENDER LOOP & AUTHENTIC SCOPE RETICLE OVERLAY
+    // 10. DUAL-CAMERA RENDER LOOP & ANIMATION UPDATER
     // =========================================================================
     const retCanvas = document.getElementById('reticleCanvas');
     const rCtx = retCanvas.getContext('2d');
@@ -1559,7 +1719,11 @@
     window.addEventListener('resize', resizeViewports);
     resizeViewports();
 
+    let lastFrameTime = performance.now();
+
     function animate(timestamp) {
+      const dtSec = Math.min(0.05, (timestamp - lastFrameTime) * 0.001);
+      lastFrameTime = timestamp;
       const tSec = timestamp * 0.001;
 
       state.windPhase += 0.008;
@@ -1573,6 +1737,94 @@
         document.getElementById('kes-dir').innerText = `${state.curWindClock.toFixed(1)} Clock`;
       }
 
+      // 1. Subtle Steel Plate Pendulum Swing
+      if (Math.abs(state.plateSwingAngle) > 0.0001 || Math.abs(state.plateSwingVel) > 0.0001) {
+        const springForce = -0.055 * state.plateSwingAngle;
+        state.plateSwingVel = (state.plateSwingVel + springForce) * 0.93;
+        state.plateSwingAngle += state.plateSwingVel;
+        platePivot.rotation.x = state.plateSwingAngle;
+      }
+
+      // 2. Muzzle Flash & Barrel Smoke Wisp
+      if (state.muzzleFlashFrames > 0) {
+        muzzleFlashGroup.visible = true;
+        muzzleFlashGroup.rotation.z = Math.random() * Math.PI;
+        state.muzzleFlashFrames--;
+      } else {
+        muzzleFlashGroup.visible = false;
+      }
+
+      const windDriftVelX = -Math.sin((state.curWindClock * 30) * Math.PI / 180) * (state.curWindMph * 0.08);
+      for (let i = activeMuzzleSmoke.length - 1; i >= 0; i--) {
+        const sm = activeMuzzleSmoke[i];
+        sm.life -= dtSec * 1.1;
+        sm.sp.position.y += sm.vy * dtSec;
+        sm.sp.position.z += sm.vz * dtSec;
+        sm.sp.position.x += windDriftVelX * 0.25 * dtSec;
+        sm.sp.scale.addScalar(0.18 * dtSec);
+        sm.mat.opacity = Math.max(0, sm.life * 0.36);
+        if (sm.life <= 0) {
+          sm.mat.dispose();
+          scene.remove(sm.sp);
+          activeMuzzleSmoke.splice(i, 1);
+        }
+      }
+
+      // 3. Bolt Cycling & Brass Casing Ejection Animation
+      if (state.boltCycleTimer >= 0) {
+        state.boltCycleTimer += dtSec;
+        const tB = state.boltCycleTimer;
+
+        // Wait 0.28s for recoil impulse to peak before running bolt
+        if (tB < 0.28) {
+          boltPivot.rotation.z = 0;
+          boltPivot.position.z = -0.02;
+        } else if (tB < 0.40) {
+          // Lift bolt handle upward (65 deg)
+          const p = (tB - 0.28) / 0.12;
+          boltPivot.rotation.z = p * 1.15;
+          boltPivot.position.z = -0.02;
+        } else if (tB < 0.56) {
+          // Pull bolt rearward & eject spent brass at full extension
+          const p = (tB - 0.40) / 0.16;
+          boltPivot.rotation.z = 1.15;
+          boltPivot.position.z = -0.02 + p * 0.075;
+          if (p > 0.7 && !state.brassEjected) {
+            state.brassEjected = true;
+            spawnEjectedBrass();
+          }
+        } else if (tB < 0.72) {
+          // Push bolt forward chambering next round
+          const p = 1.0 - (tB - 0.56) / 0.16;
+          boltPivot.rotation.z = 1.15;
+          boltPivot.position.z = -0.02 + p * 0.075;
+        } else if (tB < 0.84) {
+          // Lock bolt handle back down
+          const p = 1.0 - (tB - 0.72) / 0.12;
+          boltPivot.rotation.z = p * 1.15;
+          boltPivot.position.z = -0.02;
+        } else {
+          boltPivot.rotation.z = 0;
+          boltPivot.position.z = -0.02;
+          state.boltCycleTimer = -1;
+        }
+      }
+
+      // Animate airborne ejected brass casings
+      for (let i = activeBrass.length - 1; i >= 0; i--) {
+        const br = activeBrass[i];
+        br.life -= dtSec;
+        br.mesh.position.addScaledVector(br.vel, dtSec);
+        br.vel.y -= 9.8 * dtSec;
+        br.mesh.rotation.x += br.spinX * dtSec;
+        br.mesh.rotation.z += br.spinZ * dtSec;
+        if (br.life <= 0 || br.mesh.position.y < -0.5) {
+          scene.remove(br.mesh);
+          activeBrass.splice(i, 1);
+        }
+      }
+
+      // Wind Flag
       const showFlags = state.eq.wind === 'wind_2' || state.eq.wind === 'wind_3';
       flagPole.visible = showFlags;
       flagPivot.visible = showFlags;
@@ -1583,6 +1835,7 @@
         flagPivot.rotation.z = -droop;
       }
 
+      // Vapor Traces & Dirt Plumes
       for (let i = activeTraces.length - 1; i >= 0; i--) {
         const tr = activeTraces[i];
         tr.life -= 0.011;
@@ -1593,7 +1846,6 @@
         }
       }
 
-      const windDriftVelX = -Math.sin((state.curWindClock * 30) * Math.PI / 180) * (state.curWindMph * 0.08);
       for (let i = activeSplashes.length - 1; i >= 0; i--) {
         const sp = activeSplashes[i];
         if (sp.isSpark) {
@@ -1665,6 +1917,7 @@
 
       const euler = new THREE.Euler(totalPitch, totalYaw, 0, 'YXZ');
       rifleRig.quaternion.setFromEuler(euler);
+      rifleRig.updateMatrixWorld();
 
       const W = retCanvas.width;
       const H = retCanvas.height;

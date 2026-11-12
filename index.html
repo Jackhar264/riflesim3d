@@ -702,7 +702,6 @@
       swayX: 0,
       swayY: 0,
 
-      // Procedural Animation States
       plateSwingVel: 0,
       plateSwingAngle: 0,
       muzzleFlashFrames: 0,
@@ -906,7 +905,6 @@
     forendMesh.position.set(0, -0.072, -0.32);
     rifleRig.add(forendMesh);
 
-    // Receiver Action & Animated Bolt Group (visible in 1x + PiP view)
     const receiverMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.021, 0.16, 16), barrelMat);
     receiverMesh.rotation.x = Math.PI / 2;
     receiverMesh.position.set(0, -0.045, -0.05);
@@ -928,7 +926,6 @@
     boltPivot.add(boltBody, boltArm, boltKnob);
     rifleRig.add(boltPivot);
 
-    // Muzzle Flash Sprite Group at Brake Tip
     const muzzleFlashGroup = new THREE.Group();
     muzzleFlashGroup.position.set(0, -0.045, -0.92);
     muzzleFlashGroup.visible = false;
@@ -951,7 +948,6 @@
     muzzleFlashGroup.add(centerFlash, leftJet, rightJet);
     rifleRig.add(muzzleFlashGroup);
 
-    // Scope Tube & Turrets
     const scopeTubeMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.022, 0.36, 20), scopeMat);
     scopeTubeMesh.rotation.x = Math.PI / 2;
     scopeTubeMesh.position.set(0, 0.0, -0.24);
@@ -972,7 +968,6 @@
       else chassisMat.color.setHex(0x23262b);
     }
 
-    // Active Ejected Brass Casings & Muzzle Smoke Wisps
     const activeBrass = [];
     const activeMuzzleSmoke = [];
     const brassMat = new THREE.MeshStandardMaterial({ color: 0xd4af37, roughness: 0.28, metalness: 0.88 });
@@ -1035,7 +1030,7 @@
     }
 
     // =========================================================================
-    // 6. DYNAMIC 3D STEEL TARGET ASSEMBLY (SWINGING PIVOT + Z-FIGHTING FIX)
+    // 6. DYNAMIC 3D STEEL TARGET ASSEMBLY
     // =========================================================================
     const steelFaceMat = new THREE.MeshStandardMaterial({
       color: 0xf8fafc,
@@ -1199,7 +1194,6 @@
     const activeTraces = [];
     const activeSplashes = [];
 
-    // Tightly wound helical double-vortex bullet vapor trace (subtle & semi-transparent)
     function spawn3DTrace(pointsWorld) {
       if (pointsWorld.length < 3) return;
 
@@ -1208,9 +1202,8 @@
       const corePts = [];
 
       const totalPts = pointsWorld.length;
-      const vortexRadius = 0.018; // ~0.7 inch tight aerodynamic vortex radius
-      const turnsPerMeter = 0.45; // Tightly wound corkscrew pitch
-
+      const vortexRadius = 0.018;
+      const turnsPerMeter = 0.45;
       const upRef = new THREE.Vector3(0, 1, 0);
 
       for (let i = 0; i < totalPts; i++) {
@@ -1224,7 +1217,6 @@
 
         const distM = Math.abs(p.z);
         const theta = distM * turnsPerMeter * Math.PI * 2;
-        // Slight widening of the wake cone far downrange
         const r = vortexRadius * (1.0 + (distM / 1200) * 0.6);
 
         const offset1 = new THREE.Vector3()
@@ -1404,7 +1396,7 @@
     }
 
     // =========================================================================
-    // 7. 3D RK4 + SPIN DRIFT + CORIOLIS + TRANSONIC TRAJECTORY SOLVER
+    // 7. 3D RK4 + SPIN DRIFT + CORIOLIS + TRANSONIC TRAJECTORY SOLVER (FIXED)
     // =========================================================================
     function simulate3DTrajectory(params) {
       const {
@@ -1437,8 +1429,10 @@
 
       function zeroRK4(angle) {
         let x = 0, y = -sightH_m, vx = v0 * Math.cos(angle), vy = v0 * Math.sin(angle);
-        const dt = 0.001;
+        const dt = 0.0008;
+        let px = 0, py = -sightH_m;
         while (x < zero_m) {
+          px = x; py = y;
           const zd = (cvx, cvy) => {
             const vc = Math.sqrt(cvx * cvx + cvy * cvy);
             const ad = dragConst * (vc * vc) * getCd(vc / speedSound);
@@ -1452,7 +1446,8 @@
           vx += (dt / 6) * (k1x + 2 * k2x + 2 * k3x + k4x);
           vy += (dt / 6) * (k1y + 2 * k2y + 2 * k3y + k4y);
         }
-        return y;
+        const frac = (x !== px) ? (zero_m - px) / (x - px) : 1.0;
+        return py + frac * (y - py);
       }
 
       let zeroTheta = Math.atan(sightH_m / zero_m);
@@ -1463,8 +1458,9 @@
       }
 
       const totalPitch = launchPitch + zeroTheta;
-      const dt = 0.0015;
+      const dt = recordTrace ? 0.0012 : 0.0008;
       let t = 0, x = 0, y = -sightH_m, z = 0;
+      let px = 0, py = -sightH_m, pz = 0, pt = 0;
       let vx = v0 * Math.cos(totalPitch);
       let vy = v0 * Math.sin(totalPitch);
       let vz = 0;
@@ -1498,7 +1494,8 @@
       let stepCount = 0;
       const targetPlaneZ = activeTargetSpec.worldCenter.z;
 
-      while (x <= maxDistM) {
+      while (x < maxDistM) {
+        px = x; py = y; pz = z; pt = t;
         const [k1x, k1y, k1z] = derivs(vx, vy, vz);
         const [k2x, k2y, k2z] = derivs(vx + 0.5 * dt * k1x, vy + 0.5 * dt * k1y, vz + 0.5 * dt * k1z);
         const [k3x, k3y, k3z] = derivs(vx + 0.5 * dt * k2x, vy + 0.5 * dt * k2y, vz + 0.5 * dt * k2z);
@@ -1516,37 +1513,37 @@
           transonicTime += dt;
         }
 
-        const spin_m = (1.25 * (sg + 1.2) * (t ** 1.83)) * IN_TO_M;
-        const corH_m = omega * x * t * Math.sin(latRad);
-        const corV_m = omega * v0 * (t ** 2) * Math.cos(latRad) * Math.sin(azRad);
-
-        const worldPt = toWorld(x, y + corV_m, z + spin_m + corH_m);
-
-        // Higher sample density (every 3rd step) so tight helical coils render smoothly
-        if (recordTrace && stepCount % 3 === 0) {
-          tracePoints.push(worldPt.clone());
-        }
-        stepCount++;
-
-        if (worldPt.z <= targetPlaneZ) {
-          const dx = worldPt.x - activeTargetSpec.worldCenter.x;
-          const dy = worldPt.y - activeTargetSpec.worldCenter.y;
-
-          let plateHit = false;
-          if (activeTargetSpec.shape === 'rect') {
-            plateHit = Math.abs(dx) <= activeTargetSpec.halfW && Math.abs(dy) <= activeTargetSpec.halfH;
-          } else {
-            plateHit = Math.sqrt(dx * dx + dy * dy) <= activeTargetSpec.radius;
-          }
-
-          if (plateHit) {
-            isHit = true;
-            hitPointWorld = new THREE.Vector3(worldPt.x, worldPt.y, targetPlaneZ);
-            break;
-          }
-        }
-
+        // Only check 3D scene collisions (steel plate, berm, terrain) when firing a live round (recordTrace === true)
         if (recordTrace) {
+          const spin_m = (1.25 * (sg + 1.2) * (t ** 1.83)) * IN_TO_M;
+          const corH_m = omega * x * t * Math.sin(latRad);
+          const corV_m = omega * v0 * (t ** 2) * Math.cos(latRad) * Math.sin(azRad);
+
+          const worldPt = toWorld(x, y + corV_m, z + spin_m + corH_m);
+
+          if (stepCount % 3 === 0) {
+            tracePoints.push(worldPt.clone());
+          }
+          stepCount++;
+
+          if (worldPt.z <= targetPlaneZ) {
+            const dx = worldPt.x - activeTargetSpec.worldCenter.x;
+            const dy = worldPt.y - activeTargetSpec.worldCenter.y;
+
+            let plateHit = false;
+            if (activeTargetSpec.shape === 'rect') {
+              plateHit = Math.abs(dx) <= activeTargetSpec.halfW && Math.abs(dy) <= activeTargetSpec.halfH;
+            } else {
+              plateHit = Math.sqrt(dx * dx + dy * dy) <= activeTargetSpec.radius;
+            }
+
+            if (plateHit) {
+              isHit = true;
+              hitPointWorld = new THREE.Vector3(worldPt.x, worldPt.y, targetPlaneZ);
+              break;
+            }
+          }
+
           const bermSurfY = getBermSurfaceY(worldPt.x, worldPt.z);
           if (worldPt.y <= bermSurfY) {
             isBermHit = true;
@@ -1554,18 +1551,28 @@
             hitPointWorld.y = bermSurfY;
             break;
           }
-        }
 
-        const groundY = getTerrainHeight(worldPt.x, worldPt.z);
-        if (worldPt.y <= groundY && x > 15) {
-          hitPointWorld = worldPt.clone();
-          hitPointWorld.y = groundY;
-          break;
+          const groundY = getTerrainHeight(worldPt.x, worldPt.z);
+          if (worldPt.y <= groundY && x > 15) {
+            hitPointWorld = worldPt.clone();
+            hitPointWorld.y = groundY;
+            break;
+          }
         }
       }
 
+      // Exact fractional interpolation at maxDistM for ballistic solver accuracy
+      const frac = (x !== px) ? (maxDistM - px) / (x - px) : 1.0;
+      const yExact = py + frac * (y - py);
+      const zExact = pz + frac * (z - pz);
+      const tExact = pt + frac * (t - pt);
+
+      const spinExact = (1.25 * (sg + 1.2) * (tExact ** 1.83)) * IN_TO_M;
+      const corHExact = omega * maxDistM * tExact * Math.sin(latRad);
+      const corVExact = omega * v0 * (tExact ** 2) * Math.cos(latRad) * Math.sin(azRad);
+
       return {
-        tof: t,
+        tof: tExact,
         finalMach,
         transonicTime,
         sg,
@@ -1573,9 +1580,9 @@
         isBermHit,
         hitPointWorld,
         tracePoints,
-        endBallisticY: y + omega * v0 * (t ** 2) * Math.cos(latRad) * Math.sin(azRad),
-        endBallisticZ: z + (1.25 * (sg + 1.2) * (t ** 1.83)) * IN_TO_M + omega * x * t * Math.sin(latRad),
-        endBallisticX: x
+        endBallisticY: yExact + corVExact,
+        endBallisticZ: zExact + spinExact + corHExact,
+        endBallisticX: maxDistM
       };
     }
 
@@ -1587,6 +1594,8 @@
       const r = parseFloat(document.getElementById('sol-range').value) || 500;
       const ws = parseFloat(document.getElementById('sol-wind').value) || 0;
       const wc = parseFloat(document.getElementById('sol-clock').value) || 3;
+
+      const targetDistM = r * YD_TO_M;
 
       const sim = simulate3DTrajectory({
         launchYaw: 0,
@@ -1603,12 +1612,12 @@
         windClock: wc,
         latDeg: state.latitudeDeg,
         azDeg: state.azimuthDeg,
-        maxDistM: r * YD_TO_M,
+        maxDistM: targetDistM,
         recordTrace: false
       });
 
-      const elevMrad = Math.atan2(-sim.endBallisticY, sim.endBallisticX) * 1000.0;
-      const windMrad = Math.atan2(-sim.endBallisticZ, sim.endBallisticX) * 1000.0;
+      const elevMrad = Math.atan2(-sim.endBallisticY, targetDistM) * 1000.0;
+      const windMrad = Math.atan2(-sim.endBallisticZ, targetDistM) * 1000.0;
 
       document.getElementById('sol-out-elev').innerText = `${elevMrad.toFixed(2)} MRAD`;
       const dir = windMrad >= 0 ? 'R' : 'L';
@@ -1638,7 +1647,7 @@
     }
 
     // =========================================================================
-    // 9. FIRING ROUND IN 3D SPACE (WITH MUZZLE FLASH & BOLT CYCLE TRIGGER)
+    // 9. FIRING ROUND IN 3D SPACE
     // =========================================================================
     function fireRound() {
       if (state.inFlight) return;
@@ -1794,7 +1803,6 @@
         document.getElementById('kes-dir').innerText = `${state.curWindClock.toFixed(1)} Clock`;
       }
 
-      // 1. Subtle Steel Plate Pendulum Swing
       if (Math.abs(state.plateSwingAngle) > 0.0001 || Math.abs(state.plateSwingVel) > 0.0001) {
         const springForce = -0.055 * state.plateSwingAngle;
         state.plateSwingVel = (state.plateSwingVel + springForce) * 0.93;
@@ -1802,7 +1810,6 @@
         platePivot.rotation.x = state.plateSwingAngle;
       }
 
-      // 2. Muzzle Flash & Barrel Smoke Wisp
       if (state.muzzleFlashFrames > 0) {
         muzzleFlashGroup.visible = true;
         muzzleFlashGroup.rotation.z = Math.random() * Math.PI;
@@ -1827,7 +1834,6 @@
         }
       }
 
-      // 3. Bolt Cycling & Brass Casing Ejection Animation
       if (state.boltCycleTimer >= 0) {
         state.boltCycleTimer += dtSec;
         const tB = state.boltCycleTimer;
@@ -1862,7 +1868,6 @@
         }
       }
 
-      // Animate airborne ejected brass casings
       for (let i = activeBrass.length - 1; i >= 0; i--) {
         const br = activeBrass[i];
         br.life -= dtSec;
@@ -1876,7 +1881,6 @@
         }
       }
 
-      // Wind Flag
       const showFlags = state.eq.wind === 'wind_2' || state.eq.wind === 'wind_3';
       flagPole.visible = showFlags;
       flagPivot.visible = showFlags;
@@ -1887,7 +1891,6 @@
         flagPivot.rotation.z = -droop;
       }
 
-      // Helical Vortex Vapor Traces (translucent + subtle downwind drift)
       for (let i = activeTraces.length - 1; i >= 0; i--) {
         const tr = activeTraces[i];
         tr.life -= 0.014;
@@ -1904,7 +1907,6 @@
         }
       }
 
-      // Dirt Plumes & Steel Sparks
       for (let i = activeSplashes.length - 1; i >= 0; i--) {
         const sp = activeSplashes[i];
         if (sp.isSpark) {

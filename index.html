@@ -627,8 +627,7 @@
     ];
 
     const WIND_GEAR = [
-      { id: 'wind_1', name: 'No Wind Gear (Naked Eye)', cost: 0, desc: 'Read bullet splash dust & mirage only.' },
-      { id: 'wind_2', name: 'Downrange 3D Range Wind Flags', cost: 400, desc: 'Places an animated 3D wind flag beside the target berm.' },
+      { id: 'wind_1', name: 'No Wind Meter (Naked Eye)', cost: 0, desc: 'Read bullet splash dust & mirage only.' },
       { id: 'wind_3', name: 'Kestrel 5700 Handheld Meter', cost: 1100, desc: 'Unlocks live collapsible Kestrel weather station HUD.' }
     ];
 
@@ -728,7 +727,10 @@
         const parsed = JSON.parse(raw);
         if (typeof parsed.cash === 'number') state.cash = parsed.cash;
         if (Array.isArray(parsed.unlocked)) state.unlocked = parsed.unlocked;
-        if (parsed.eq) state.eq = { ...DEFAULT_SAVE.eq, ...parsed.eq };
+        if (parsed.eq) {
+          state.eq = { ...DEFAULT_SAVE.eq, ...parsed.eq };
+          if (state.eq.wind === 'wind_2') state.eq.wind = 'wind_1';
+        }
         const o = OPTICS.find(x => x.id === state.eq.optic) || OPTICS[0];
         state.zoom = Math.min(o.maxZoom, Math.max(o.minZoom, state.zoom));
         document.getElementById('hud-zoom').innerText = `${state.zoom.toFixed(1)}x`;
@@ -756,7 +758,7 @@
       return {
         b: BULLETS.find(x => x.id === state.eq.bullet),
         o: OPTICS.find(x => x.id === state.eq.optic),
-        w: WIND_GEAR.find(x => x.id === state.eq.wind),
+        w: WIND_GEAR.find(x => x.id === state.eq.wind) || WIND_GEAR[0],
         a: BRASS_POWDER.find(x => x.id === state.eq.ammo),
         brl: BARRELS.find(x => x.id === state.eq.barrel),
         chs: CHASSIS.find(x => x.id === state.eq.chassis)
@@ -1044,7 +1046,6 @@
     const postMat = new THREE.MeshStandardMaterial({ color: 0x2d3748, roughness: 0.8 });
     const bermMat = new THREE.MeshStandardMaterial({ color: 0x6e5539, roughness: 0.95 });
     const padMat = new THREE.MeshStandardMaterial({ color: 0x4f4334, roughness: 0.98 });
-    const flagMat = new THREE.MeshStandardMaterial({ color: 0xe53e3e, side: THREE.DoubleSide, roughness: 0.7 });
 
     const rangeAssembly = new THREE.Group();
     scene.add(rangeAssembly);
@@ -1081,15 +1082,6 @@
     const plateHolder = new THREE.Group();
     plateHolder.position.set(0, -0.70, 0);
     platePivot.add(plateHolder);
-
-    const flagPole = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.95, 6), postMat);
-    flagPole.position.set(1.65, 0.97, 0);
-    const flagPivot = new THREE.Group();
-    flagPivot.position.set(1.65, 1.76, 0);
-    const flagCloth = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.4), flagMat);
-    flagCloth.position.set(0.5, 0, 0);
-    flagPivot.add(flagCloth);
-    rangeAssembly.add(flagPole, flagPivot);
 
     let activeTargetSpec = {
       worldCenter: new THREE.Vector3(0, 1.05, -500 * YD_TO_M),
@@ -1217,7 +1209,8 @@
 
         const distM = Math.abs(p.z);
         const theta = distM * turnsPerMeter * Math.PI * 2;
-        const r = vortexRadius * (1.0 + (distM / 1200) * 0.6);
+        const endTaper = (i === totalPts - 1) ? 0.0 : 1.0;
+        const r = vortexRadius * (1.0 + (distM / 1200) * 0.6) * endTaper;
 
         const offset1 = new THREE.Vector3()
           .addScaledVector(right, Math.cos(theta) * r)
@@ -1471,7 +1464,6 @@
       let sg = (30.0 * wtGr) / ((tRatio ** 2) * (diaIn ** 3) * lRatio * (1.0 + (lRatio ** 2)));
       sg = (sg * Math.cbrt(mvFps / 2800.0)) / ft;
 
-      // Stochastic shockwave pitch/yaw kick direction sampled once per shot for smooth in-flight transonic curve
       const stabilityFactor = Math.max(0.6, Math.min(2.0, sg));
       const transonicKickYawRate = recordTrace ? gaussianRandom(0, 0.0011 / stabilityFactor) : 0;
       const transonicKickPitchRate = recordTrace ? gaussianRandom(0, (0.0011 * 1.15) / stabilityFactor) : 0;
@@ -1515,7 +1507,6 @@
         const curSpeed = Math.sqrt(vx * vx + vy * vy + vz * vz);
         finalMach = curSpeed / speedSound;
 
-        // Apply transonic angular perturbation directly to flight velocity so vapor trail matches impact
         if (finalMach <= 1.25 && finalMach >= 0.85) {
           transonicTime += dt;
           if (recordTrace) {
@@ -1871,16 +1862,6 @@
           scene.remove(br.mesh);
           activeBrass.splice(i, 1);
         }
-      }
-
-      const showFlags = state.eq.wind === 'wind_2' || state.eq.wind === 'wind_3';
-      flagPole.visible = showFlags;
-      flagPivot.visible = showFlags;
-      if (showFlags) {
-        const windBlowAngle = ((state.curWindClock * 30 + 180) * Math.PI) / 180;
-        flagPivot.rotation.y = windBlowAngle + Math.sin(tSec * 7) * 0.12;
-        const droop = Math.max(0.05, 0.7 - (state.curWindMph / 20));
-        flagPivot.rotation.z = -droop;
       }
 
       for (let i = activeTraces.length - 1; i >= 0; i--) {

@@ -1824,7 +1824,7 @@
         flagPivot.rotation.z = -droop;
       }
 
-      // Vapor Traces & Dirt Plumes
+      // Vapor Traces & Dirt Plumes (Quarter duration: 0.022 decay rate)
       for (let i = activeTraces.length - 1; i >= 0; i--) {
         const tr = activeTraces[i];
         tr.life -= 0.011;
@@ -1848,7 +1848,7 @@
           continue;
         }
 
-        sp.life -= 0.0055;
+        sp.life -= 0.022;
 
         sp.puffs.forEach(pf => {
           pf.sprite.position.x += (pf.vx + windDriftVelX * (1.0 - sp.life * 0.5)) * 0.016;

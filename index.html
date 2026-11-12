@@ -436,7 +436,7 @@
         <div class="ammo-cost" id="ui-ammo-cost">-$1.50/rd</div>
       </div>
 
-      <!-- Target Shape & Distance Selector (Matches 2D System) -->
+      <!-- Target Shape & Distance Selector -->
       <div class="range-bar">
         <select id="sel-target-type" onchange="changeRangeSetup()">
           <option value="ipsc_full">Full IPSC (1.0x Pay)</option>
@@ -672,7 +672,7 @@
       unlocked: [...DEFAULT_SAVE.unlocked],
       eq: { ...DEFAULT_SAVE.eq },
 
-      targetType: 'ipsc_full', // ipsc_full, ipsc_23, gong_15moa, gong_10moa
+      targetType: 'ipsc_full',
       distanceYd: 500,
 
       azimuthDeg: 90,
@@ -771,8 +771,9 @@
     scene.background = new THREE.Color(0x88b4dc);
     scene.fog = new THREE.FogExp2(0x9ec0de, 0.00032);
 
-    const mainCamera = new THREE.PerspectiveCamera(42, 16 / 10, 0.1, 3500);
-    const scopeCamera = new THREE.PerspectiveCamera(2.0, 1, 0.5, 3500);
+    const mainCamera = new THREE.PerspectiveCamera(42, 16 / 10, 0.5, 3500);
+    // Near plane set to 1.5m to prevent telephoto depth-buffer Z-fighting at 1000–2000 yd
+    const scopeCamera = new THREE.PerspectiveCamera(2.0, 1, 1.5, 3500);
 
     const hemiLight = new THREE.HemisphereLight(0xdceeff, 0x4d5d38, 0.85);
     scene.add(hemiLight);
@@ -886,50 +887,55 @@
     }
 
     // =========================================================================
-    // 6. DYNAMIC 3D STEEL TARGET ASSEMBLY (PROPER FACING GONG & IPSC SILHOUETTE)
+    // 6. DYNAMIC 3D STEEL TARGET ASSEMBLY (CLEARLY SEPARATED FROM BERM)
     // =========================================================================
     const steelFaceMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.38, metalness: 0.25 });
     const steelRimMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.7 });
     const postMat = new THREE.MeshStandardMaterial({ color: 0x2d3748, roughness: 0.8 });
     const bermMat = new THREE.MeshStandardMaterial({ color: 0x6e5539, roughness: 0.95 });
+    const padMat = new THREE.MeshStandardMaterial({ color: 0x4f4334, roughness: 0.98 });
     const flagMat = new THREE.MeshStandardMaterial({ color: 0xe53e3e, side: THREE.DoubleSide, roughness: 0.7 });
 
     const rangeAssembly = new THREE.Group();
     scene.add(rangeAssembly);
 
-    // Backstop Berm
-    const bermMesh = new THREE.Mesh(new THREE.ConeGeometry(8.5, 3.8, 14), bermMat);
-    bermMesh.position.set(0, 1.5, -3.8);
-    bermMesh.scale.set(1.7, 1, 0.8);
+    // Leveled gravel pad under the target stand (z = 0) so stand legs sit cleanly
+    const padMesh = new THREE.Mesh(new THREE.BoxGeometry(5.5, 0.3, 3.5), padMat);
+    padMesh.position.set(0, -0.1, 0);
+    rangeAssembly.add(padMesh);
+
+    // Backstop Berm placed 9.5m behind the target (front toe ends at z = -4.0m)
+    // Guarantees zero clipping or intersection with the target plate at z = 0
+    const bermMesh = new THREE.Mesh(new THREE.ConeGeometry(8.5, 4.4, 16), bermMat);
+    bermMesh.position.set(0, 1.8, -9.5);
+    bermMesh.scale.set(1.6, 1.0, 0.65);
     rangeAssembly.add(bermMesh);
 
-    // T-Post & Crossbar Stand
+    // T-Post & Crossbar Stand at z = 0
     const frameH = 1.75;
-    const leftLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, frameH, 8), postMat);
+    const leftLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, frameH, 8), postMat);
     leftLeg.position.set(-0.55, frameH / 2, 0);
-    const rightLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, frameH, 8), postMat);
+    const rightLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, frameH, 8), postMat);
     rightLeg.position.set(0.55, frameH / 2, 0);
-    const topBar = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 1.2, 8), postMat);
+    const topBar = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 1.2, 8), postMat);
     topBar.rotation.z = Math.PI / 2;
     topBar.position.set(0, frameH, 0);
     rangeAssembly.add(leftLeg, rightLeg, topBar);
 
-    // Container for the active target plate (rebuilt cleanly whenever target type/distance changes)
     const plateHolder = new THREE.Group();
-    plateHolder.position.set(0, 1.05, 0);
+    plateHolder.position.set(0, 1.05, 0.06); // Slightly forward of T-post legs
     rangeAssembly.add(plateHolder);
 
     // Wind Flag beside target
-    const flagPole = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 1.9, 6), postMat);
-    flagPole.position.set(1.45, 0.95, 0);
+    const flagPole = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.95, 6), postMat);
+    flagPole.position.set(1.65, 0.97, 0);
     const flagPivot = new THREE.Group();
-    flagPivot.position.set(1.45, 1.72, 0);
-    const flagCloth = new THREE.Mesh(new THREE.PlaneGeometry(0.95, 0.38), flagMat);
-    flagCloth.position.set(0.475, 0, 0);
+    flagPivot.position.set(1.65, 1.76, 0);
+    const flagCloth = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.4), flagMat);
+    flagCloth.position.set(0.5, 0, 0);
     flagPivot.add(flagCloth);
     rangeAssembly.add(flagPole, flagPivot);
 
-    // Track active target collision & world center
     let activeTargetSpec = {
       worldCenter: new THREE.Vector3(0, 1.05, -500 * YD_TO_M),
       shape: 'rect',
@@ -947,7 +953,6 @@
     }
 
     function rebuildRangeTarget() {
-      // Clear previous plate meshes
       while (plateHolder.children.length > 0) {
         plateHolder.remove(plateHolder.children[0]);
       }
@@ -958,14 +963,14 @@
       rangeAssembly.position.set(0, groundY, zPos);
 
       const centerHeightY = 1.05;
-      activeTargetSpec.worldCenter.set(0, groundY + centerHeightY, zPos);
+      activeTargetSpec.worldCenter.set(0, groundY + centerHeightY, zPos + 0.06);
 
-      // Hanging steel chains from crossbar (y = 1.75 relative to ground, or +0.70 relative to plateHolder)
+      // Hanging chains
       const chainMat = new THREE.MeshStandardMaterial({ color: 0x1a202c });
-      const leftChain = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.65, 6), chainMat);
-      leftChain.position.set(-0.18, 0.38, -0.01);
-      const rightChain = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.65, 6), chainMat);
-      rightChain.position.set(0.18, 0.38, -0.01);
+      const leftChain = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.65, 6), chainMat);
+      leftChain.position.set(-0.18, 0.38, -0.02);
+      const rightChain = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.65, 6), chainMat);
+      rightChain.position.set(0.18, 0.38, -0.02);
       plateHolder.add(leftChain, rightChain);
 
       if (state.targetType === 'ipsc_full' || state.targetType === 'ipsc_23') {
@@ -973,22 +978,20 @@
         const wM = 18 * s * IN_TO_M;
         const hM = 30 * s * IN_TO_M;
 
-        // Torso (85% of total height) + Dark backing frame so silhouette is crisp against the berm
         const torsoH = hM * 0.84;
         const torsoY = -hM * 0.08;
-        const torsoBack = new THREE.Mesh(new THREE.BoxGeometry(wM + 0.025, torsoH + 0.025, 0.02), steelRimMat);
-        torsoBack.position.set(0, torsoY, -0.005);
-        const torsoFace = new THREE.Mesh(new THREE.BoxGeometry(wM, torsoH, 0.022), steelFaceMat);
-        torsoFace.position.set(0, torsoY, 0);
+        const torsoBack = new THREE.Mesh(new THREE.BoxGeometry(wM + 0.03, torsoH + 0.03, 0.02), steelRimMat);
+        torsoBack.position.set(0, torsoY, -0.02);
+        const torsoFace = new THREE.Mesh(new THREE.BoxGeometry(wM, torsoH, 0.025), steelFaceMat);
+        torsoFace.position.set(0, torsoY, 0.01);
 
-        // IPSC Upper Headbox (50% width, 16% height)
         const headW = wM * 0.50;
         const headH = hM * 0.16;
         const headY = torsoY + (torsoH / 2) + (headH / 2);
-        const headBack = new THREE.Mesh(new THREE.BoxGeometry(headW + 0.025, headH + 0.025, 0.02), steelRimMat);
-        headBack.position.set(0, headY, -0.005);
-        const headFace = new THREE.Mesh(new THREE.BoxGeometry(headW, headH, 0.022), steelFaceMat);
-        headFace.position.set(0, headY, 0);
+        const headBack = new THREE.Mesh(new THREE.BoxGeometry(headW + 0.03, headH + 0.03, 0.02), steelRimMat);
+        headBack.position.set(0, headY, -0.02);
+        const headFace = new THREE.Mesh(new THREE.BoxGeometry(headW, headH, 0.025), steelFaceMat);
+        headFace.position.set(0, headY, 0.01);
 
         plateHolder.add(torsoBack, torsoFace, headBack, headFace);
 
@@ -996,16 +999,14 @@
         activeTargetSpec.halfW = wM / 2;
         activeTargetSpec.halfH = hM / 2;
       } else {
-        // Round Steel Gong (1.5 MOA or 1.0 MOA)
         const moa = state.targetType === 'gong_10moa' ? 1.0 : 1.5;
         const diaM = (moa * 1.047 * (state.distanceYd / 100)) * IN_TO_M;
         const radM = diaM / 2;
 
-        // CircleGeometry faces directly along +Z (toward the shooter's scope)
-        const rimDisc = new THREE.Mesh(new THREE.CircleGeometry(radM + 0.018, 32), steelRimMat);
-        rimDisc.position.set(0, 0, -0.004);
+        const rimDisc = new THREE.Mesh(new THREE.CircleGeometry(radM + 0.025, 32), steelRimMat);
+        rimDisc.position.set(0, 0, -0.01);
         const faceDisc = new THREE.Mesh(new THREE.CircleGeometry(radM, 32), steelFaceMat);
-        faceDisc.position.set(0, 0, 0.004);
+        faceDisc.position.set(0, 0, 0.02);
 
         plateHolder.add(rimDisc, faceDisc);
 
@@ -1013,7 +1014,6 @@
         activeTargetSpec.radius = radM;
       }
 
-      // Slew rifle smoothly onto the newly placed target
       const dy = activeTargetSpec.worldCenter.y;
       const dz = activeTargetSpec.worldCenter.z;
       state.yawRad = 0;
@@ -1096,7 +1096,7 @@
       });
       const sparkMesh = new THREE.Mesh(new THREE.SphereGeometry(sparkR, 10, 10), sparkMat);
       sparkMesh.position.copy(posWorld);
-      sparkMesh.position.z += 0.05;
+      sparkMesh.position.z += 0.06;
       scene.add(sparkMesh);
 
       activeSplashes.push({
@@ -1116,7 +1116,7 @@
       const mat = new THREE.MeshBasicMaterial({ color: isHit ? 0x1a202c : 0x2b1d10 });
       const decal = new THREE.Mesh(geo, mat);
       decal.position.copy(posWorld);
-      decal.position.z += 0.025;
+      decal.position.z += 0.035;
       scene.add(decal);
       activeDecals.push(decal);
     }
@@ -1244,7 +1244,6 @@
         }
         stepCount++;
 
-        // Check crossing of target plane Z
         if (worldPt.z <= targetPlaneZ) {
           const dx = worldPt.x - activeTargetSpec.worldCenter.x;
           const dy = worldPt.y - activeTargetSpec.worldCenter.y;
@@ -1263,7 +1262,6 @@
           }
         }
 
-        // Check terrain / berm ground collision
         const groundY = getTerrainHeight(worldPt.x, worldPt.z);
         if (worldPt.y <= groundY && x > 15) {
           hitPointWorld = worldPt.clone();
@@ -1404,7 +1402,6 @@
         sim.hitPointWorld.x += gaussianRandom(0, jitterM);
         sim.hitPointWorld.y += gaussianRandom(0, jitterM * 1.15);
 
-        // Re-evaluate hit against active target plate after transonic perturbation
         if (Math.abs(sim.hitPointWorld.z - activeTargetSpec.worldCenter.z) <= 1.2) {
           const dx = sim.hitPointWorld.x - activeTargetSpec.worldCenter.x;
           const dy = sim.hitPointWorld.y - activeTargetSpec.worldCenter.y;

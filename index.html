@@ -1396,7 +1396,7 @@
     }
 
     // =========================================================================
-    // 7. 3D RK4 + SPIN DRIFT + CORIOLIS + TRANSONIC TRAJECTORY SOLVER (FIXED)
+    // 7. 3D RK4 + SPIN DRIFT + CORIOLIS + IN-FLIGHT TRANSONIC PERTURBATION
     // =========================================================================
     function simulate3DTrajectory(params) {
       const {
@@ -1471,6 +1471,11 @@
       let sg = (30.0 * wtGr) / ((tRatio ** 2) * (diaIn ** 3) * lRatio * (1.0 + (lRatio ** 2)));
       sg = (sg * Math.cbrt(mvFps / 2800.0)) / ft;
 
+      // Stochastic shockwave pitch/yaw kick direction sampled once per shot for smooth in-flight transonic curve
+      const stabilityFactor = Math.max(0.6, Math.min(2.0, sg));
+      const transonicKickYawRate = recordTrace ? gaussianRandom(0, 0.0011 / stabilityFactor) : 0;
+      const transonicKickPitchRate = recordTrace ? gaussianRandom(0, (0.0011 * 1.15) / stabilityFactor) : 0;
+
       const omega = 7.2921159e-5;
       const latRad = latDeg * (Math.PI / 180);
       const azRad = azDeg * (Math.PI / 180);
@@ -1509,11 +1514,16 @@
 
         const curSpeed = Math.sqrt(vx * vx + vy * vy + vz * vz);
         finalMach = curSpeed / speedSound;
+
+        // Apply transonic angular perturbation directly to flight velocity so vapor trail matches impact
         if (finalMach <= 1.25 && finalMach >= 0.85) {
           transonicTime += dt;
+          if (recordTrace) {
+            vy += curSpeed * transonicKickPitchRate * dt;
+            vz += curSpeed * transonicKickYawRate * dt;
+          }
         }
 
-        // Only check 3D scene collisions (steel plate, berm, terrain) when firing a live round (recordTrace === true)
         if (recordTrace) {
           const spin_m = (1.25 * (sg + 1.2) * (t ** 1.83)) * IN_TO_M;
           const corH_m = omega * x * t * Math.sin(latRad);
@@ -1540,6 +1550,7 @@
             if (plateHit) {
               isHit = true;
               hitPointWorld = new THREE.Vector3(worldPt.x, worldPt.y, targetPlaneZ);
+              tracePoints.push(hitPointWorld.clone());
               break;
             }
           }
@@ -1549,6 +1560,7 @@
             isBermHit = true;
             hitPointWorld = worldPt.clone();
             hitPointWorld.y = bermSurfY;
+            tracePoints.push(hitPointWorld.clone());
             break;
           }
 
@@ -1556,12 +1568,12 @@
           if (worldPt.y <= groundY && x > 15) {
             hitPointWorld = worldPt.clone();
             hitPointWorld.y = groundY;
+            tracePoints.push(hitPointWorld.clone());
             break;
           }
         }
       }
 
-      // Exact fractional interpolation at maxDistM for ballistic solver accuracy
       const frac = (x !== px) ? (maxDistM - px) / (x - px) : 1.0;
       const yExact = py + frac * (y - py);
       const zExact = pz + frac * (z - pz);
@@ -1702,26 +1714,6 @@
         maxDistM: state.distanceYd * YD_TO_M + 45,
         recordTrace: true
       });
-
-      if (sim.transonicTime > 0 && sim.hitPointWorld) {
-        const stabilityFactor = Math.max(0.6, Math.min(2.0, sim.sg));
-        const transonicJitterMrad = (sim.transonicTime * 0.42) / stabilityFactor;
-        const distM = Math.abs(sim.hitPointWorld.z);
-        const jitterM = (transonicJitterMrad / 1000) * distM;
-        sim.hitPointWorld.x += gaussianRandom(0, jitterM);
-        sim.hitPointWorld.y += gaussianRandom(0, jitterM * 1.15);
-
-        if (Math.abs(sim.hitPointWorld.z - activeTargetSpec.worldCenter.z) <= 1.2) {
-          const dx = sim.hitPointWorld.x - activeTargetSpec.worldCenter.x;
-          const dy = sim.hitPointWorld.y - activeTargetSpec.worldCenter.y;
-          if (activeTargetSpec.shape === 'rect') {
-            sim.isHit = Math.abs(dx) <= activeTargetSpec.halfW && Math.abs(dy) <= activeTargetSpec.halfH;
-          } else {
-            sim.isHit = Math.sqrt(dx * dx + dy * dy) <= activeTargetSpec.radius;
-          }
-          if (sim.isHit) sim.hitPointWorld.z = activeTargetSpec.worldCenter.z;
-        }
-      }
 
       state.recoilPitch = 0.0032 * chs.recoilMult * (b.wt / 100);
       state.recoilYaw = gaussianRandom(0, 0.0007 * chs.recoilMult);

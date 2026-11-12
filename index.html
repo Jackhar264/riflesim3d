@@ -706,7 +706,7 @@
       plateSwingVel: 0,
       plateSwingAngle: 0,
       muzzleFlashFrames: 0,
-      boltCycleTimer: -1, // -1 = idle, >= 0 = animating cycle
+      boltCycleTimer: -1,
       brassEjected: false,
 
       inFlight: false
@@ -913,7 +913,7 @@
     rifleRig.add(receiverMesh);
 
     const boltPivot = new THREE.Group();
-    boltPivot.position.set(0, -0.045, -0.02); // Pivots around bore axis
+    boltPivot.position.set(0, -0.045, -0.02);
     const boltBody = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.12, 12), boltSteelMat);
     boltBody.rotation.x = Math.PI / 2;
     boltBody.position.set(0, 0, -0.02);
@@ -983,12 +983,10 @@
       const caseGeo = new THREE.CylinderGeometry(0.0055 * scaleMult, 0.0062 * scaleMult, 0.052 * scaleMult, 10);
       const mesh = new THREE.Mesh(caseGeo, brassMat);
 
-      // Ejection port world position
       const localPort = new THREE.Vector3(0.025, -0.035, -0.04);
       const worldPort = localPort.applyMatrix4(rifleRig.matrixWorld);
       mesh.position.copy(worldPort);
 
-      // Eject up and right relative to rifle orientation
       const rightVec = new THREE.Vector3(1, 0, 0).applyQuaternion(rifleRig.quaternion);
       const upVec = new THREE.Vector3(0, 1, 0).applyQuaternion(rifleRig.quaternion);
       const backVec = new THREE.Vector3(0, 0, 1).applyQuaternion(rifleRig.quaternion);
@@ -1081,13 +1079,12 @@
     topBar.position.set(0, frameH, 0);
     rangeAssembly.add(leftLeg, rightLeg, topBar);
 
-    // Top-hinged pivot group so steel target swings realistically when struck
     const platePivot = new THREE.Group();
     platePivot.position.set(0, frameH, 0.08);
     rangeAssembly.add(platePivot);
 
     const plateHolder = new THREE.Group();
-    plateHolder.position.set(0, -0.70, 0); // Plate center at y = 1.75 - 0.70 = 1.05m
+    plateHolder.position.set(0, -0.70, 0);
     platePivot.add(plateHolder);
 
     const flagPole = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.95, 6), postMat);
@@ -1324,7 +1321,6 @@
       const decal = new THREE.Mesh(geo, mat);
 
       if (isHit) {
-        // Attach lead splatter directly to swinging plateHolder so it moves with the steel
         decal.position.set(
           posWorld.x - activeTargetSpec.worldCenter.x,
           posWorld.y - activeTargetSpec.worldCenter.y,
@@ -1598,7 +1594,6 @@
       document.getElementById('btn-fire').disabled = true;
       setFeedback("SHOT FIRED — TRACKING 3D TRACE...", "#e5a93b");
 
-      // Trigger Muzzle Flash, Smoke Wisp & Bolt Cycle Animation
       state.muzzleFlashFrames = 3;
       spawnMuzzleSmoke();
       state.boltCycleTimer = 0.0;
@@ -1672,7 +1667,6 @@
         if (sim.isHit) {
           spawn3DSteelSpark(sim.hitPointWorld);
           spawn3DImpactDecal(sim.hitPointWorld, true, false);
-          // Subtle physical swing impulse on the steel target plate
           state.plateSwingVel -= 0.048 * Math.min(1.5, b.wt / 140);
 
           const multMap = {
@@ -1757,7 +1751,7 @@
       const windDriftVelX = -Math.sin((state.curWindClock * 30) * Math.PI / 180) * (state.curWindMph * 0.08);
       for (let i = activeMuzzleSmoke.length - 1; i >= 0; i--) {
         const sm = activeMuzzleSmoke[i];
-        sm.life -= dtSec * 1.1;
+        sm.life -= dtSec * 2.2;
         sm.sp.position.y += sm.vy * dtSec;
         sm.sp.position.z += sm.vz * dtSec;
         sm.sp.position.x += windDriftVelX * 0.25 * dtSec;
@@ -1775,17 +1769,14 @@
         state.boltCycleTimer += dtSec;
         const tB = state.boltCycleTimer;
 
-        // Wait 0.28s for recoil impulse to peak before running bolt
         if (tB < 0.28) {
           boltPivot.rotation.z = 0;
           boltPivot.position.z = -0.02;
         } else if (tB < 0.40) {
-          // Lift bolt handle upward (65 deg)
           const p = (tB - 0.28) / 0.12;
           boltPivot.rotation.z = p * 1.15;
           boltPivot.position.z = -0.02;
         } else if (tB < 0.56) {
-          // Pull bolt rearward & eject spent brass at full extension
           const p = (tB - 0.40) / 0.16;
           boltPivot.rotation.z = 1.15;
           boltPivot.position.z = -0.02 + p * 0.075;
@@ -1794,12 +1785,10 @@
             spawnEjectedBrass();
           }
         } else if (tB < 0.72) {
-          // Push bolt forward chambering next round
           const p = 1.0 - (tB - 0.56) / 0.16;
           boltPivot.rotation.z = 1.15;
           boltPivot.position.z = -0.02 + p * 0.075;
         } else if (tB < 0.84) {
-          // Lock bolt handle back down
           const p = 1.0 - (tB - 0.72) / 0.12;
           boltPivot.rotation.z = p * 1.15;
           boltPivot.position.z = -0.02;
